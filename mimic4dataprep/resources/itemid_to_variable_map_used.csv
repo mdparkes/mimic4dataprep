@@ -1,0 +1,121 @@
+﻿VARIABLE,ITEMID,LABEL,UNITNAME,PARAM_TYPE,LINKSTO
+Albumin,50862,Albumin,g/dL,Numeric,labevents
+Albumin,53085,Albumin,g/dL,Numeric,labevents
+Albumin,227456,Albumin,g/dL,Numeric,chartevents
+ALP,50863,Alkaline Phosphatase,IU/L,Numeric,labevents
+ALP,53086,Alkaline Phosphatase,IU/L,Numeric,labevents
+ALP,225612,Alkaline Phosphate,IU/L,Numeric,chartevents
+ALT,50861,Alanine Aminotransferase (ALT),IU/L,Numeric,labevents
+ALT,53084,Alanine Aminotransferase,IU/L,Numeric,labevents
+ALT,220644,ALT,IU/L,Numeric,chartevents
+Arterial pCO2,50818,pCO2,mmHg,Numeric,labevents
+Arterial pCO2,220235,Arterial CO2 Pressure,mmHg,Numeric,chartevents
+Arterial pH,50820,pH,,Numeric,labevents
+Arterial pH,223830,PH (Arterial),,Numeric,chartevents
+Arterial pO2,50821,pO2,mmHg,Numeric,labevents
+Arterial pO2,220224,Arterial O2 pressure,mmHg,Numeric,chartevents
+AST,50878,Asparate Aminotransferase (AST),IU/L,Numeric,labevents
+AST,53088,Asparate Aminotransferase,IU/L,Numeric,labevents
+AST,220587,AST,IU/L,Numeric,chartevents
+Bicarbonate,50803,"Calculated Bicarbonate, Whole Blood",mmol/L,Numeric,labevents
+Bicarbonate,50882,Bicarbonate,mmol/L,Numeric,labevents
+Blood urea nitrogen,51006,Urea Nitrogen,mg/dL,Numeric,labevents
+Blood urea nitrogen,52647,Urea Nitrogen,mg/dL,Numeric,labevents
+Capillary refill rate,223951,Capillary Refill R,,Text,chartevents
+Capillary refill rate,224308,Capillary Refill L,,Text,chartevents
+Diagnosis Descriptions,1000001,Diagnosis Descriptions,,Text,
+Diastolic arterial blood pressure,220051,Arterial Blood Pressure diastolic,mmHg,Numeric,chartevents
+Diastolic arterial blood pressure,220180,Non Invasive Blood Pressure diastolic,mmHg,Numeric,chartevents
+Diastolic arterial blood pressure,224643,Manual Blood Pressure Diastolic Left,mmHg,Numeric,chartevents
+Diastolic arterial blood pressure,225310,ART BP Diastolic,mmHg,Numeric,chartevents
+Diastolic arterial blood pressure,227242,Manual Blood Pressure Diastolic Right,mmHg,Numeric,chartevents
+Discharge Summary,1000000,Discharge Summary,,Text,discharge
+End-tidal CO2,228640,EtCO2,mL,Numeric,chartevents
+Fraction inspired oxygen,223835,Inspired O2 Fraction,,Numeric,chartevents
+Fraction inspired oxygen,229280,FiO2 (ECMO),%,Numeric,chartevents
+Fraction inspired oxygen,229841,FiO2 (CH),%,Numeric,chartevents
+GCS eye opening,220739,GCS - Eye Opening,,Text,chartevents
+GCS motor response,223901,GCS - Motor Response,,Text,chartevents
+GCS verbal response,223900,GCS - Verbal Response,,Text,chartevents
+Glucose,50809,Glucose,mg/dL,Numeric,labevents
+Glucose,50931,Glucose,mg/dL,Numeric,labevents
+Glucose,52569,Glucose,mg/dL,Numeric,labevents
+Glucose,220621,Glucose (serum),mg/dL,Numeric,chartevents
+Glucose,225664,Glucose finger stick (range 70-100),mg/dL,Numeric,chartevents
+Height,226707,Height,Inch,Numeric,chartevents
+Height,226730,Height (cm),cm,Numeric,chartevents
+Hematocrit,50810,"Hematocrit, Calculated",%,Numeric,labevents
+Hematocrit,51221,Hematocrit,%,Numeric,labevents
+Hematocrit,51638,Hematocrit,%,Numeric,labevents
+Hematocrit,51639,Hematocrit,%,Numeric,labevents
+Hematocrit,52028,Hematocrit,%,Numeric,labevents
+Hematocrit,220545,Hematocrit (serum),%,Numeric,chartevents
+Hemoglobin,50811,Hemoglobin,g/dL,Numeric,labevents
+Hemoglobin,51222,Hemoglobin,g/dL,Numeric,labevents
+Hemoglobin,51640,Hemoglobin,g/dL,Numeric,labevents
+Hemoglobin,52157,Plasma Hemoglobin,g/dL,Numeric,labevents
+Hemoglobin,220228,Hemoglobin,g/dL,Numeric,chartevents
+Lactate,50813,Lactate,mmol/L,Numeric,labevents
+Lactate,53154,Lactate,mmol/L,Numeric,labevents
+Lactate dehydrogenase,50954,Lactate Dehydrogenase (LD),IU/L,Numeric,labevents
+Lactate dehydrogenase,220632,LDH,IU/L,Numeric,chartevents
+Mean arterial blood pressure,220052,Arterial Blood Pressure mean,mmHg,Numeric,chartevents
+Mean arterial blood pressure,220181,Non Invasive Blood Pressure mean,mmHg,Numeric,chartevents
+Mean arterial blood pressure,225312,ART BP Mean,mmHg,Numeric,chartevents
+Platelet count,51265,Platelet Count,K/uL,Numeric,labevents
+Platelet count,53189,Platelet Count,K/uL,Numeric,labevents
+Platelet count,227457,Platelet Count,,Numeric,chartevents
+Respiration rate,220210,Respiratory Rate,insp/min,Numeric,chartevents
+Respiration rate,224690,Respiratory Rate (Total),insp/min,Numeric,chartevents
+SaO2,50817,Oxygen Saturation,%,Numeric,labevents
+SaO2,220227,Arterial O2 Saturation,%,Numeric,chartevents
+Serum creatinine,50912,Creatinine,mg/dL,Numeric,labevents
+Serum creatinine,52546,Creatinine,mg/dL,Numeric,labevents
+Serum creatinine,220615,Creatinine (serum),mg/dL,Numeric,chartevents
+Serum magnesium,50960,Magnesium,mg/dL,Numeric,labevents
+Serum magnesium,220635,Magnesium,mg/dL,Numeric,chartevents
+Serum potassium,50971,Potassium,mmol/L,Numeric,labevents
+Serum potassium,52610,Potassium,mmol/L,Numeric,labevents
+Serum potassium,227442,Potassium (serum),mmol/L,Numeric,chartevents
+Serum sodium,50983,Sodium,mmol/L,Numeric,labevents
+Serum sodium,52623,Sodium,mmol/L,Numeric,labevents
+Serum sodium,220645,Sodium (serum),mmol/L,Numeric,chartevents
+SpO2,220277,O2 saturation pulseoxymetry,%,Numeric,chartevents
+Systolic arterial blood pressure,220050,Arterial Blood Pressure systolic,mmHg,Numeric,chartevents
+Systolic arterial blood pressure,220179,Non Invasive Blood Pressure systolic,mmHg,Numeric,chartevents
+Systolic arterial blood pressure,224167,Manual Blood Pressure Systolic Left,mmHg,Numeric,chartevents
+Systolic arterial blood pressure,225309,ART BP Systolic,mmHg,Numeric,chartevents
+Systolic arterial blood pressure,227243,Manual Blood Pressure Systolic Right,mmHg,Numeric,chartevents
+Temperature,223761,Temperature Fahrenheit,F,Numeric,chartevents
+Temperature,223762,Temperature Celsius,C,Numeric,chartevents
+Tidal volume,224685,Tidal Volume (observed),mL,Numeric,chartevents
+Total bilirubin,50885,"Bilirubin, Total",mg/dL,Numeric,labevents
+Total bilirubin,53089,"Bilirubin, Total",mg/dL,Numeric,labevents
+Total bilirubin,225690,Total Bilirubin,mg/dL,Numeric,chartevents
+Total cholesterol,50907,"Cholesterol, Total",mg/dL,Numeric,labevents
+Total cholesterol,220603,Cholesterol,mg/dL,Numeric,chartevents
+Troponin I,52642,Troponin I,ng/mL,Numeric,labevents
+Troponin T,51003,Troponin T,ng/mL,Numeric,labevents
+Troponin T,227429,Troponin-T,ng/mL,Numeric,labevents
+Urine output,226557,R Ureteral Stent,mL,Numeric,outputevents
+Urine output,226558,L Ureteral Stent,mL,Numeric,outputevents
+Urine output,226559,Foley,mL,Numeric,outputevents
+Urine output,226560,Void,mL,Numeric,outputevents
+Urine output,226561,Condom Cath,mL,Numeric,outputevents
+Urine output,226563,Suprapubic,mL,Numeric,outputevents
+Urine output,226564,R Nephrostomy,mL,Numeric,outputevents
+Urine output,226565,L Nephrostomy,mL,Numeric,outputevents
+Urine output,226567,Straight Cath,mL,Numeric,outputevents
+Urine output,226627,OR Urine,mL,Numeric,outputevents
+Urine output,226631,PACU Urine,mL,Numeric,outputevents
+Venous pCO2,226062,Venous CO2 Pressure,mmHg,Numeric,chartevents
+Venous pO2,226063,Venous O2 Pressure,mmHg,Numeric,chartevents
+Weight,224639,Daily Weight,kg,Numeric,chartevents
+Weight,226512,Admission Weight (Kg),kg,Numeric,chartevents
+Weight,226531,Admission Weight (lbs.),lb,Numeric,chartevents
+White blood cell count,51300,WBC Count,K/uL,Numeric,labevents
+White blood cell count,51301,White Blood Cells,K/uL,Numeric,labevents
+White blood cell count,51755,White Blood Cells,K/uL,Numeric,labevents
+White blood cell count,51756,White Blood Cells,K/uL,Numeric,labevents
+White blood cell count,220546,WBC,,Numeric,chartevents
+Heart rate,220045,Heart Rate,bpm,Numeric,chartevents
