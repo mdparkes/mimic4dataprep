@@ -115,8 +115,8 @@ if ICD_DIAGNOSIS_ITEMID in items_to_keep:  # 1000001 is the ITEMID for the conca
     if args.verbose:
         print('Adding ICD diagnosis descriptions to events.csv')
 
-    for subject_dir in tqdm(os.listdir(args['output_path']), desc='Iterating over subjects'):
-            subj_path = os.path.join(args['output_path'], subject_dir)
+    for subject_dir in tqdm(os.listdir(args.output_path), desc='Iterating over subjects'):
+            subj_path = os.path.join(args.output_path, subject_dir)
             if not os.path.isdir(subj_path):
                 continue
 
