@@ -1,6 +1,9 @@
 # Development notes (contains personal TODO lists and decisions)
 DEVELOPMENT_NOTES.md
 
+# HPC batch sripts
+slurm_mimic4dataprep.sh
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
