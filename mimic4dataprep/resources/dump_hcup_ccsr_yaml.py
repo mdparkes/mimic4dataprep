@@ -83,37 +83,7 @@ if __name__ == "__main__":
             output_dict[desc]['codes'].add(icd_code)
     # Convert the set of codes for each CCSR category to a list
     for key in output_dict.keys():
-        output_dict[key]['codes'] = list(output_dict[key]['codes'])
-
-
-
-
-    # cat_cols = slice(5, len(dxccsr.columns), 2)  # Non-default category codes start at column 5
-    # dxccsr.iloc[:, cat_cols] = dxccsr.iloc[:, cat_cols].replace({
-    #     'RSP014': 'RSP011',  # Pneumothorax -> Pleurisy; pneumothorax; pulmonary collapse
-    # })
-    # ccsr_categories = pd.unique(dxccsr.iloc[:, cat_cols].to_numpy().ravel())
-    # ccsr_categories = [cat for cat in ccsr_categories if cat != ' ']
-
-    # desc_cols = slice(6, len(dxccsr.columns), 2)  # Non-default category descriptions start at column 6
-    # # Replace CCSR respiratory condition descriptions in dataframe
-    # # Note that there will be some information corruption here, but this is a "best effort" solution to align CCS and
-    # # CCSR categories that are mostly the same. Here we replace CCSR labels with their closest CCS equivalents.
-    # dxccsr.iloc[:, desc_cols] = dxccsr.iloc[:, desc_cols].replace({
-    #     'Acute hemorrhagic cerebrovascular disease': 'Acute cerebrovascular disease',
-    #     'Diabetes mellitus with complication': 'Diabetes mellitus with complications',
-    #     'Other specified and unspecified liver disease': 'Other liver diseases',
-    #     'Other specified and unspecified lower respiratory disease': 'Other lower respiratory disease',
-    #     'Other specified and unspecified upper respiratory disease': 'Other upper respiratory disease',
-    #     'Pleurisy, pleural effusion and pulmonary collapse': 'Pleurisy; pneumothorax; pulmonary collapse',
-    #     'Pneumonia (except that caused by tuberculosis)': 'Pneumonia (except that caused by tuberculosis or sexually transmitted disease)',
-    #     'Pneumothorax': 'Pleurisy; pneumothorax; pulmonary collapse',
-    #     'Respiratory failure; insufficiency; arrest': 'Respiratory failure; insufficiency; arrest (adult)',
-    #     'Septicemia': 'Septicemia (except in labor)'
-    # })
-    # ccsr_descriptions = pd.unique(dxccsr.iloc[:, desc_cols].to_numpy().ravel())
-    # ccsr_descriptions = [desc for desc in ccsr_descriptions if not pd.isnull(desc)]
-    
+        output_dict[key]['codes'] = list(output_dict[key]['codes'])    
 
     # Set the use_in_benchmark flag to True for select CCSR categories
     use_in_benchmark = [
