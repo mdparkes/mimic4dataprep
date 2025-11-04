@@ -214,7 +214,7 @@ def add_hcup_groups(diagnoses, icd_version, definitions):
         lambda c: '; '.join(def_map[c][0]) if c in def_map else None
     )
     diagnoses.loc[sel_rows, 'USE_IN_BENCHMARK'] = diagnoses.loc[sel_rows, 'ICD_CODE'].apply(
-        lambda c: int(def_map[c][1]) if c in def_map else None
+        lambda c: int(def_map[c][1]) if c in def_map else 0
     )
     return diagnoses
 
