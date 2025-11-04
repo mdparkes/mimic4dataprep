@@ -1,15 +1,4 @@
 """
-TODO
-
-I messed up the mapping from CCSR category descriptions to CCSR category codes. Fix it.
-
-
-RSP011 and RSP014 both map to 'Pleurisy; pneumothorax; pulmonary collapse'
-
-"""
-
-
-"""
 Maps ICD-10-CM codes to HCUP Clinical Classifications Software Refined (CCSR) categories using the 2024.1
 release of the HCUP CCSR software. The mapping is dumped to a YAML file.
 
