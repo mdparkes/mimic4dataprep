@@ -56,7 +56,7 @@ def read_icd_diagnoses_table(mimic4_path):
 def get_table_file_path(mimic4_path, table):
     for root, dirs, files in os.walk(mimic4_path):
         for file in files:
-            if table in file:
+            if file == f'{table}.csv':
                 return os.path.join(root, file)
     return None
 
