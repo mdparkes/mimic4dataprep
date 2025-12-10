@@ -109,7 +109,6 @@ for table in args.event_tables:
         subjects_to_keep=subjects
     )
 
-# TODO Review the following code and ensure it is correct.
 # Add descriptions of ICD diagnosis codes during each hospital stay to events.csv as a pipe-delimited string
 if ICD_DIAGNOSIS_ITEMID in items_to_keep:  # 1000001 is the ITEMID for the concatenated string of ICD diagnoses
     if args.verbose:
