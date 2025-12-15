@@ -85,7 +85,7 @@ plmat = make_phenotype_label_matrix(diagnoses, icd9_defs, icd10_defs, stays)
 plmat.to_csv(path_out, index=False, quoting=csv.QUOTE_NONNUMERIC)
 
 if args.test:
-    pat_idx = np.random.choice(patients.shape[0], size=100)
+    pat_idx = np.random.choice(patients.shape[0], size=1000)
     patients = patients.iloc[pat_idx]
     # stays = stays.merge(patients[['SUBJECT_ID']], left_on='SUBJECT_ID', right_on='SUBJECT_ID')
     stays = stays[stays.SUBJECT_ID.isin(patients.SUBJECT_ID)]
