@@ -11,7 +11,6 @@ import re
 
 from tqdm import tqdm
 
-from mimic4dataprep.util import get_resources_dir_path
 
 random.seed(49297)
 
@@ -122,8 +121,8 @@ def process_partition(root_dir, output_dir, partition, file_table, definitions, 
 
 def main():
     parser = argparse.ArgumentParser(description="Create data for phenotype classification task.")
-    parser.add_argument('root_path', type=str, help="Directory where all patients' timeseries are stored.")
-    parser.add_argument('output_path', type=str, help="Directory where the created listfile should be stored. "
+    parser.add_argument('patient_dir', type=str, help="Directory where all patients' timeseries are stored.")
+    parser.add_argument('output_dir', type=str, help="Directory where the created listfile should be stored. "
                         "Listfiles will be saved in a different subdirectory for each cross validation fold.")
     parser.add_argument('--icd9_phenotype_definitions', '-p9', type=str,
                         default=os.path.join(os.path.dirname(__file__), '../resources/hcup_ccs_2015_definitions.yaml'),
@@ -164,29 +163,28 @@ def main():
                 'use_in_benchmark': icd10_defs[group]['use_in_benchmark']
             }
 
-    resources_dir = get_resources_dir_path()
-    partition_table_files = [f for f in os.listdir(resources_dir) if f.startswith('fold')]
+    partition_table_files = [f for f in os.listdir(args.output_dir) if f.startswith('fold')]
     n_folds = max([int(re.match(r'fold(\d+)', f).group(1)) for f in partition_table_files])
     
     for i in range(n_folds + 1):
         print(f"Processing fold {i}...")
-        fold_path = os.path.join(args.output_path, f"fold{i}")
+        fold_path = os.path.join(args.output_dir, f"fold{i}")
         train_file_table = pd.read_csv(
-            os.path.join(resources_dir, f'fold{i}_train.csv'), 
+            os.path.join(fold_path, f'fold{i}_train.csv'),
             dtype={'patient_id': str, 'episode': int}
         )
         test_file_table = pd.read_csv(
-            os.path.join(resources_dir, f'fold{i}_test.csv'),
+            os.path.join(fold_path, f'fold{i}_test.csv'),
             dtype={'patient_id': str, 'episode': int}
         )
-        if os.path.exists(os.path.join(resources_dir, f'fold{i}_val.csv')):
+        if os.path.exists(os.path.join(fold_path, f'fold{i}_val.csv')):
             val_file_table = pd.read_csv(
-                os.path.join(resources_dir, f'fold{i}_val.csv'),
+                os.path.join(fold_path, f'fold{i}_val.csv'),
                 dtype={'patient_id': str, 'episode': int}
             )
-            process_partition(args.root_path, fold_path, "val", val_file_table, definitions)
-        process_partition(args.root_path, fold_path, "train", train_file_table, definitions)
-        process_partition(args.root_path, fold_path, "test", test_file_table, definitions)
+            process_partition(args.patient_dir, fold_path, "val", val_file_table, definitions)
+        process_partition(args.patient_dir, fold_path, "train", train_file_table, definitions)
+        process_partition(args.patient_dir, fold_path, "test", test_file_table, definitions)
         print('\n')
 
 

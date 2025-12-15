@@ -23,23 +23,23 @@ import re
 from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from typing import Dict, List
 
-from mimic4dataprep.util import get_resources_dir_path
 
+def remove_existing_partition_tables(directory) -> None:
+    """
+    Recursively remove existing partition tables from the specified directory.
+    """
 
-def remove_existing_partition_tables() -> None:
-    """
-    Remove existing partition tables from the resources directory.
-    """
-    resources_dir = get_resources_dir_path()
-    to_remove = [f for f in os.listdir(resources_dir) if re.match(r'fold\d+_(train|val|test).csv', f)]
-    if len(to_remove) > 0:
-        print(f"Removing {len(to_remove)} training/validation/test set partition tables from 'resources' directory.")
-        for f in to_remove:
-            os.remove(os.path.join(resources_dir, f))
+    for root, dirs, files in os.walk(directory):
+        to_remove = [os.path.join(root, f) for f in files if re.match(r'fold\d+_(train|val|test).csv', f)]
+        if len(to_remove) > 0:
+            print(f"Removing existing training/validation/test set partition tables from '{root}' directory.")
+            for f in to_remove:
+                os.remove(f)
 
 
 def write_partition_table(
-    root_path: str,
+    patient_dir: str,
+    output_dir: str,
     fold: int,
     partition: str,
     patient_ids: List[str],
@@ -49,8 +49,10 @@ def write_partition_table(
     Write the training, validation, or test partition table for a given fold.
 
     Args:
-        root_path: str
+        patient_dir: str
             Path to the root directory containing patient subdirectories.
+        output_dir: str
+            Directory where the partition table CSV files should be written.
         fold: int
             Fold number.
         partition: str
@@ -69,21 +71,29 @@ def write_partition_table(
     # Get the file paths for the episodes to include in the partition
     partition_paths = []
     for pt_id in patient_ids:
-        patient_path = os.path.abspath(os.path.join(root_path, pt_id))
+        patient_path = os.path.abspath(os.path.join(patient_dir, pt_id))
         episode_file_paths = [os.path.join(patient_path, f'episode{i}.csv') for i in patient_episodes[pt_id]]
         partition_paths.extend(episode_file_paths)
         
     # Extract the the patient IDs and episode numbers from the file path for addition to output table
     partition_table_rows = [(p, *regex.search(p).groups()) for p in partition_paths]
     partition_table = pd.DataFrame(partition_table_rows, columns=['file_path', 'patient_id', 'episode'])
-    resources_dir = get_resources_dir_path()
-    partition_table.to_csv(os.path.join(resources_dir, f'fold{fold}_{partition}.csv'), index=False)
+    
+    fold_dir = os.path.join(output_dir, f'fold{fold}')
+    os.makedirs(fold_dir, exist_ok=True)
+
+    partition_table.to_csv(os.path.join(fold_dir, f'fold{fold}_{partition}.csv'), index=False)
     
 
 def main():
 
     parser = argparse.ArgumentParser(description='Split data into train and test sets.')
-    parser.add_argument('subjects_root_path', type=str, help='Directory containing subject sub-directories.')
+    parser.add_argument('patient_dir', type=str, 
+                        help='Directory containing patient subdirectories with medical record timeseries data.')
+    parser.add_argument('output_dir', type=str, 
+                        help='Directory where partition tables will be written. The tables will be stored in ' \
+                        'subdirectories named fold0, fold1, etc. If not performing cross-validation, the ' \
+                        'tables will be stored under a fold0 subdirectory.')
     parser.add_argument('--cv', action='store_true', help='Perform cross-validation.')
     parser.add_argument('--n_folds', type=int, default=5, help='Number of folds for cross-validation.')
     parser.add_argument('--make_val_set', action='store_true', help='Create a validation set.')
@@ -94,7 +104,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     args, _ = parser.parse_known_args()
 
-    remove_existing_partition_tables()
+    # Remove existing partition tables from previous runs
+    remove_existing_partition_tables(args.output_dir)
 
     rng = np.random.default_rng(args.seed)
 
@@ -102,15 +113,15 @@ def main():
     mortality = []
     patient_episodes = dict()  # Key: patient ID, Value: list of episodes to consider during partitioning
 
-    # Get list of all patient directories in subjects_root_path
-    all_patient_ids = [d for d in os.listdir(args.subjects_root_path) 
-                       if os.path.isdir(os.path.join(args.subjects_root_path, d))]
+    # Get list of all patient directories in patient_dir
+    all_patient_ids = [d for d in os.listdir(args.patient_dir) 
+                       if os.path.isdir(os.path.join(args.patient_dir, d))]
     
     regex = re.compile(r'episode(\d+).csv')
 
     for pt_id in all_patient_ids.copy():
         # print(pt_id)
-        patient_path = os.path.join(args.subjects_root_path, pt_id)
+        patient_path = os.path.join(args.patient_dir, pt_id)
         files = os.listdir(patient_path)
         all_episodes = [int(regex.search(x).group(1)) for x in files if regex.match(x)]  # Extract episode numbers
         if len(all_episodes) == 0:
@@ -134,7 +145,7 @@ def main():
 
         if args.stratify_mortality:
             # Append to the list of labels (in-hospital mortality status) used for stratified k-fold CV
-            fp = os.path.join(args.subjects_root_path, pt_id, f'episode{mortality_episode}.csv')
+            fp = os.path.join(args.patient_dir, pt_id, f'episode{mortality_episode}.csv')
             mortality.append(int(pd.read_csv(fp, usecols=['Mortality']).iloc[0, 0]))
     
     if args.cv:  # Partition data for cross-validation
@@ -148,9 +159,9 @@ def main():
                     train_pts, val_pts = train_test_split(
                         train_pts, test_size=0.2, random_state=args.seed, stratify=[mortality[i] for i in train_idx]
                     )
-                    write_partition_table(args.subjects_root_path, fold, 'val', val_pts, patient_episodes)
-                write_partition_table(args.subjects_root_path, fold, 'train', train_pts, patient_episodes)
-                write_partition_table(args.subjects_root_path, fold, 'test', test_pts, patient_episodes)
+                    write_partition_table(args.patient_dir, args.output_dir, fold, 'val', val_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, fold, 'train', train_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, fold, 'test', test_pts, patient_episodes)
         else:
             kf = KFold(n_splits=args.n_folds, shuffle=True, random_state=args.seed)
             for fold, (train_idx, test_idx) in enumerate(kf.split(all_patient_ids)):
@@ -158,9 +169,9 @@ def main():
                 test_pts = [all_patient_ids[i] for i in test_idx]
                 if args.make_val_set:
                     train_pts, val_pts = train_test_split(train_pts, test_size=0.2, random_state=args.seed)
-                    write_partition_table(args.subjects_root_path, fold, 'val', val_pts, patient_episodes)
-                write_partition_table(args.subjects_root_path, fold, 'train', train_pts, patient_episodes)
-                write_partition_table(args.subjects_root_path, fold, 'test', test_pts, patient_episodes)
+                    write_partition_table(args.patient_dir, args.output_dir, fold, 'val', val_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, fold, 'train', train_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, fold, 'test', test_pts, patient_episodes)
                                        
     else:  # Split data into singular train and test sets
  
@@ -173,7 +184,7 @@ def main():
                     train_pts, test_size=0.2, random_state=args.seed, 
                     stratify=[mortality[all_patient_ids.index(pt)] for pt in train_pts]
                 )
-                write_partition_table(args.subjects_root_path, 0, 'val', val_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, 0, 'val', val_pts, patient_episodes)
         else:
             train_pts, test_pts = train_test_split(
                 all_patient_ids, test_size=0.2, random_state=args.seed
@@ -182,11 +193,11 @@ def main():
                 train_pts, val_pts = train_test_split(
                     train_pts, test_size=0.2, random_state=args.seed
                 )
-                write_partition_table(args.subjects_root_path, 0, 'val', val_pts, patient_episodes)
+                write_partition_table(args.patient_dir, args.output_dir, 0, 'val', val_pts, patient_episodes)
 
         # Create partitions under a fold1 directory to simplify the directory structure for downstream scripts
-        write_partition_table(args.subjects_root_path, 0, 'train', train_pts, patient_episodes)
-        write_partition_table(args.subjects_root_path, 0, 'test', test_pts, patient_episodes)
+        write_partition_table(args.patient_dir, args.output_dir, 0, 'train', train_pts, patient_episodes)
+        write_partition_table(args.patient_dir, args.output_dir, 0, 'test', test_pts, patient_episodes)
 
 
 if __name__ == '__main__':
