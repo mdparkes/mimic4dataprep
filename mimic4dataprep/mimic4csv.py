@@ -163,7 +163,7 @@ def read_events_table_by_row(mimic4_path, table, column_names, subjects_to_keep=
     }
     
     # Process full chunks rather than individual rows
-    for chunk in pd.read_csv(file_path, chunksize=chunksize, quoting=csv.QUOTE_MINIMAL):
+    for chunk in pd.read_csv(file_path, chunksize=chunksize):
         chunk.columns = chunk.columns.str.upper()
         chunk = chunk.rename(columns=rename_mapping)
         

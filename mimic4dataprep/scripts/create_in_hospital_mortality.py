@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+import csv
 import os
 import argparse
 import pandas as pd
@@ -44,27 +45,23 @@ def process_partition(root_dir, output_dir, partition, file_table, eps=1e-6, n_h
                 if los < n_hours - eps:
                     continue
 
-                ts_lines = tsfile.readlines()
-                ts_lines = ts_lines[1:]
-                event_times = [float(line.split(',')[0]) for line in ts_lines]
+                reader = csv.reader(tsfile)
+                header = next(reader)  # Skip header
+                ts_rows = list(reader)
+                event_times = [float(row[0]) for row in ts_rows]
 
                 # In the original code, t was subject to a strict lower bound of -eps to restrict events to
                 # the ICU stay. This is not compatible with experiments that require a complete history of
                 # events. Therefore, the lower bound has been removed in favor of filtering the events in
                 # the upstream extract_episodes_from_subjects.py script as necessary.
-                ts_lines = [line for (line, t) in zip(ts_lines, event_times) if t < n_hours + eps]
+                ts_rows = [row for (row, t) in zip(ts_rows, event_times) if t < n_hours + eps]
 
                 # no measurements in ICU
-                if len(ts_lines) == 0:
+                if len(ts_rows) == 0:
                     print("\n\t(no events in ICU) ", patient, ts_filename)
                     continue
 
                 ts_file_path = os.path.abspath(os.path.join(root_dir, patient, ts_filename))
-                # if not os.path.exists(os.path.join(output_dir, output_ts_filename)):
-                #     with open(os.path.join(output_dir, output_ts_filename), "w") as outfile:
-                #         outfile.write(header)
-                #         for line in ts_lines:
-                #             outfile.write(line)
 
                 xy_pairs.append((ts_file_path, mortality))
 
