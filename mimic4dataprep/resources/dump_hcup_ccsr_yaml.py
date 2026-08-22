@@ -81,9 +81,9 @@ if __name__ == "__main__":
         descriptions = row[1][ccsr_desc_cols].dropna().tolist()
         for desc in descriptions:
             output_dict[desc]['codes'].add(icd_code)
-    # Convert the set of codes for each CCSR category to a list
+    # Convert the set of codes for each CCSR category to a sorted list so that the dumped YAML is reproducible
     for key in output_dict.keys():
-        output_dict[key]['codes'] = list(output_dict[key]['codes'])    
+        output_dict[key]['codes'] = sorted(output_dict[key]['codes'])
 
     # Set the use_in_benchmark flag to True for select CCSR categories
     use_in_benchmark = [
