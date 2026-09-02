@@ -117,3 +117,48 @@ class TestAccumulator:
         accumulator.add(np.full(EXTREMES + 10, 1e6))
         removed, saturated = accumulator.beyond(-np.inf, 1e5)
         assert saturated
+
+
+class TestAccumulatorScales:
+    """The tool reads a hundred thousand subjects' worth of events on a shared node, so the
+    accumulators have to be bounded in memory and linear in time."""
+
+    def test_the_reservoir_is_a_uniform_sample_once_full(self):
+        """Reservoir sampling is only correct if late values can displace early ones."""
+        accumulator = Accumulator(reservoir=1_000, extremes=100)
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            accumulator.add(rng.normal(0.0, 1.0, 1_000))
+        assert accumulator.count == 50_000
+        assert accumulator.reservoir.size == 1_000
+        # A sample of a standard normal, not the first thousand values only.
+        assert abs(float(np.mean(accumulator.reservoir))) < 0.15
+        assert 0.85 < float(np.std(accumulator.reservoir)) < 1.15
+
+    def test_the_tails_are_exact_not_sampled(self):
+        """The gap search walks the tail, so an error must not be lost to reservoir sampling."""
+        accumulator = Accumulator(reservoir=1_000, extremes=100)
+        rng = np.random.default_rng(1)
+        for _ in range(50):
+            accumulator.add(rng.normal(10.0, 1.0, 1_000))
+        accumulator.add(np.array([1e7]))
+        for _ in range(50):
+            accumulator.add(rng.normal(10.0, 1.0, 1_000))
+        assert accumulator.high.max() == pytest.approx(1e7), 'the outlier was sampled away'
+
+    def test_memory_stays_bounded(self):
+        accumulator = Accumulator(reservoir=1_000, extremes=100)
+        rng = np.random.default_rng(2)
+        for _ in range(200):
+            accumulator.add(rng.normal(0.0, 1.0, 1_000))
+        assert accumulator.reservoir.size == 1_000
+        assert accumulator.high.size == 100
+        assert accumulator.low.size == 100
+        assert accumulator.count == 200_000
+
+    def test_pending_values_are_not_lost_before_a_trim(self):
+        """Values added since the last trim must still be visible to the tails."""
+        accumulator = Accumulator(reservoir=10, extremes=1_000)
+        accumulator.add(np.array([5.0, 6.0]))
+        accumulator.add(np.array([1e6]))
+        assert accumulator.high.max() == pytest.approx(1e6)

@@ -32,7 +32,6 @@ Usage:
 import argparse
 import os
 import random
-import sys
 
 import numpy as np
 
@@ -47,28 +46,73 @@ from mimic4dataprep.subject import read_events
 RESERVOIR = 200_000
 EXTREMES = 20_000
 
+# An itemid accumulator only ever yields a median, so it needs a fraction of the sample. With a
+# few hundred itemids, giving each the full variable-sized reservoir would cost gigabytes.
+ITEMID_RESERVOIR = 20_000
+ITEMID_EXTREMES = 1_000
+
 
 class Accumulator:
-    """Bounded per-variable sample: a reservoir for quantiles, plus the two tails in full."""
+    """Bounded sample of one series: a reservoir for quantiles, plus both tails in full.
 
-    def __init__(self):
+    Backed by numpy rather than Python lists -- a float in a list costs 32 bytes against 8 --
+    and the tails are trimmed lazily. Trimming on every call would re-scan the retained tail
+    once per subject per variable, which is quadratic in the wrong quantity.
+    """
+
+    def __init__(self, reservoir=RESERVOIR, extremes=EXTREMES):
         self.count = 0
-        self.reservoir = []
-        self.high = []
-        self.low = []
+        self.capacity = reservoir
+        self.extremes = extremes
+        self._reservoir = np.empty(reservoir, dtype=np.float64)
+        self._filled = 0
+        self._high = np.empty(0, dtype=np.float64)
+        self._low = np.empty(0, dtype=np.float64)
+        self._pending = []
 
     def add(self, values):
-        for value in values:
-            self.count += 1
-            if len(self.reservoir) < RESERVOIR:
-                self.reservoir.append(value)
-            else:
-                # Reservoir sampling: every value seen has an equal chance of being retained.
-                j = random.randrange(self.count)
-                if j < RESERVOIR:
-                    self.reservoir[j] = value
-        self.high = sorted(self.high + list(values), reverse=True)[:EXTREMES]
-        self.low = sorted(self.low + list(values))[:EXTREMES]
+        values = np.asarray(values, dtype=np.float64)
+        if values.size == 0:
+            return
+
+        # Reservoir sampling: every value seen keeps an equal chance of being retained.
+        take = min(self.capacity - self._filled, values.size)
+        if take:
+            self._reservoir[self._filled:self._filled + take] = values[:take]
+            self._filled += take
+        for offset in range(take, values.size):
+            j = random.randrange(self.count + offset + 1)
+            if j < self.capacity:
+                self._reservoir[j] = values[offset]
+        self.count += values.size
+
+        self._pending.append(values)
+        if sum(p.size for p in self._pending) >= self.extremes:
+            self._trim()
+
+    def _trim(self):
+        """Fold the pending values into the retained tails. O(n) via partition, not a sort."""
+        if not self._pending:
+            return
+        combined = np.concatenate([self._high, self._low] + self._pending)
+        self._pending = []
+        k = min(self.extremes, combined.size)
+        self._high = np.partition(combined, -k)[-k:]
+        self._low = np.partition(combined, k - 1)[:k]
+
+    @property
+    def high(self):
+        self._trim()
+        return self._high
+
+    @property
+    def low(self):
+        self._trim()
+        return self._low
+
+    @property
+    def reservoir(self):
+        return self._reservoir[:self._filled]
 
     def tail_sample(self):
         """Reservoir plus both tails, for the gap search.
@@ -76,11 +120,11 @@ class Accumulator:
         The two overlap while the reservoir is not yet full, so this is not a sample of the
         distribution and must not be counted against. Finding a gap does not care.
         """
-        return np.array(self.reservoir + self.high + self.low, dtype=float)
+        return np.concatenate([self.reservoir, self.high, self.low])
 
     def body_sample(self):
         """The reservoir alone: a uniform sample of every value seen, for quantiles."""
-        return np.array(self.reservoir, dtype=float)
+        return self.reservoir
 
     def beyond(self, low, high):
         """Exactly how many observed values fall outside the cuts.
@@ -89,9 +133,11 @@ class Accumulator:
         than sampled -- unless more than EXTREMES values lie beyond a cut, which would mean
         the rule is removing far too much to adopt anyway.
         """
-        above = sum(1 for v in self.high if v > high)
-        below = sum(1 for v in self.low if v < low)
-        saturated = above >= len(self.high) == EXTREMES or below >= len(self.low) == EXTREMES
+        tail_high, tail_low = self.high, self.low
+        above = int((tail_high > high).sum())
+        below = int((tail_low < low).sum())
+        saturated = (above >= tail_high.size == self.extremes
+                     or below >= tail_low.size == self.extremes)
         return above + below, saturated
 
 
@@ -178,7 +224,9 @@ def collect(subjects_root, var_map, n_subjects, seed):
                 v = sub['VALUE'].to_numpy(dtype=float, na_value=np.nan)
                 v = v[np.isfinite(v)]
                 if v.size:
-                    by_itemid.setdefault((variable, itemid), Accumulator()).add(v)
+                    by_itemid.setdefault(
+                        (variable, itemid),
+                        Accumulator(ITEMID_RESERVOIR, ITEMID_EXTREMES)).add(v)
         if index % 500 == 0:
             print(f'  {index:,} subjects, {len(by_variable)} variables', flush=True)
 
@@ -212,7 +260,7 @@ def report_tail_gap(by_variable, args):
               f'{("none" if high == np.inf else f"{high:.4g}"):>14}'
               f'{removed:>10,}{share:>8.4%}{marker}')
     print('-' * 100)
-    print(f'  Counts are exact: the {EXTREMES:,} most extreme values of each tail are retained '
+    print(f'  Counts are exact while a tail holds fewer than its cap of retained values. '
           f'in full.')
     print(f'  Anything above {args.warn_fraction:.2%} is removing more than errors and '
           f'wants looking at before the rule is adopted.')
