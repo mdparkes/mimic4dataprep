@@ -10,7 +10,13 @@ per-variable knowledge:
                 genuine tail is continuous however far it extends; errors from decimal slips,
                 unit slips and sentinels sit in a separate cluster orders of magnitude out. The
                 cut point adapts per variable, so nothing has to be told how far a real tail
-                runs.
+                runs. Its weakness is that one erroneous value between the body and a far one
+                bridges the gap that was supposed to separate them.
+
+    robust      Cut at `--z` robust spreads from the median, in log space, with the spread
+    spread      measured from the variable itself. Nothing bridges anything, and the threshold
+                means the same thing for a variable whose body spans a factor of two as for
+                one that spans three orders of magnitude.
 
     unit audit  Read the declared UNITNAME of every ITEMID pooled under one VARIABLE. An
                 ITEMID recorded in a unit nothing converts is invisible per value -- every
@@ -65,6 +71,10 @@ class Accumulator:
 
     def __init__(self, reservoir=RESERVOIR, extremes=EXTREMES):
         self.count = 0
+        # Neither log rule can see these: log10 is undefined at zero and below, so both
+        # drop them before searching and neither can report on them.
+        self.zeros = 0
+        self.negatives = 0
         self.capacity = reservoir
         self.extremes = extremes
         self._reservoir = np.empty(reservoir, dtype=np.float64)
@@ -88,6 +98,8 @@ class Accumulator:
             if j < self.capacity:
                 self._reservoir[j] = values[offset]
         self.count += values.size
+        self.zeros += int((values == 0).sum())
+        self.negatives += int((values < 0).sum())
 
         self._pending.append(values)
         if sum(p.size for p in self._pending) >= self.extremes:
@@ -143,16 +155,25 @@ class Accumulator:
         return (float(kept_low.min()) if kept_low.size else np.nan,
                 float(kept_high.max()) if kept_high.size else np.nan)
 
+    @property
+    def positive_count(self):
+        """Observations both log rules could actually see."""
+        return self.count - self.zeros - self.negatives
+
     def beyond(self, low, high):
-        """Exactly how many observed values fall outside the cuts.
+        """How many positive observations fall outside the cuts.
 
         Counted from the retained extremes rather than the reservoir, so it is exact rather
         than sampled -- unless more than EXTREMES values lie beyond a cut, which would mean
         the rule is removing far too much to adopt anyway.
+
+        Zeros and negatives are excluded. Both rules derive their cuts from positive values
+        alone, so counting values they never saw against them reads a variable's sentinel
+        share as if the rule had chosen to remove it. Those are reported on their own.
         """
         tail_high, tail_low = self.high, self.low
-        above = int((tail_high > high).sum())
-        below = int((tail_low < low).sum())
+        above = int((tail_high[tail_high > 0] > high).sum())
+        below = int((tail_low[tail_low > 0] < low).sum())
         saturated = (above >= tail_high.size == self.extremes
                      or below >= tail_low.size == self.extremes)
         return above + below, saturated
@@ -265,6 +286,45 @@ def collect(subjects_root, var_map, n_subjects, seed):
     return by_variable, by_itemid
 
 
+def robust_log_cut(values, k):
+    """Cut at a fixed number of robust spreads from the median, in log space.
+
+    The gap rule fails on two counts that no threshold of its own can fix: a single
+    erroneous value between the body and a far one bridges the gap that was supposed to
+    separate them, and its guard is a fixed multiple of the median, which is many spreads
+    out for a tight variable and inside the normal range for a wide one.
+
+    Working in log space makes the rule scale-free, and taking the spread from the variable
+    itself makes the threshold mean the same thing everywhere: a temperature 1.2 decades out
+    is absurd, an ALT 2.7 decades out is a real acute liver injury, and the two are told
+    apart by how far their own bodies spread, not by a decade count.
+
+    Returns:
+        (low_cut, high_cut, scale), where scale is one robust spread in decades. Infinite
+        cuts and a NaN scale when there is too little to measure, or a zero scale when the
+        variable is so discrete that half its values sit on the median.
+    """
+    positive = values[values > 0]
+    if positive.size < 100:
+        return -np.inf, np.inf, np.nan
+
+    y = np.log10(positive)
+    centre = float(np.median(y))
+    # 1.4826 puts the MAD on the same footing as a standard deviation for normal data, so k
+    # reads as a number of sigmas rather than an arbitrary unit.
+    scale = 1.4826 * float(np.median(np.abs(y - centre)))
+    if scale <= 0:
+        return -np.inf, np.inf, 0.0
+    return 10.0 ** (centre - k * scale), 10.0 ** (centre + k * scale), scale
+
+
+def robust_log_z(value, centre, scale):
+    """How many robust spreads a value sits from the median, in log space."""
+    if not np.isfinite(value) or value <= 0 or not scale or not np.isfinite(scale):
+        return np.nan
+    return (np.log10(value) - centre) / scale
+
+
 TAIL_GAP_WIDTH = 124
 
 
@@ -288,7 +348,8 @@ def report_tail_gap(by_variable, args):
         low, high = tail_gap_cut(accumulator.tail_sample(),
                                  args.gap, args.quantile, args.min_fold)
         removed, saturated = accumulator.beyond(low, high)
-        share = removed / accumulator.count if accumulator.count else 0.0
+        seen = accumulator.positive_count
+        share = removed / seen if seen else 0.0
         marker = '  <-- inspect' if share > args.warn_fraction else ''
         if saturated:
             marker = '  <-- SATURATED, removing far too much'
@@ -303,6 +364,74 @@ def report_tail_gap(by_variable, args):
     print(f'  Counts are exact while a tail holds fewer than its cap of retained values.')
     print(f'  Anything above {args.warn_fraction:.2%} is removing more than errors and '
           f'wants looking at before the rule is adopted.')
+
+
+ROBUST_WIDTH = 133
+
+
+def report_robust_log(by_variable, args):
+    """Per variable, where a fixed number of robust spreads would cut, and how far out the
+    worst surviving values actually sit. The z columns are the decision: read down them for
+    a k that separates the variables you know are wrong from the ones you know are right."""
+    print(f'\n{"=" * ROBUST_WIDTH}')
+    print(f'ROBUST LOG SPREAD  (cut at {args.z} robust spreads from the median, in log space)')
+    print('=' * ROBUST_WIDTH)
+    print(f'{"variable":<34}{"spread":>10}{"z(min)":>10}{"z(max)":>10}{"low cut":>12}'
+          f'{"min kept":>12}{"max kept":>13}{"high cut":>13}{"removed":>10}{"%":>9}')
+    print('-' * ROBUST_WIDTH)
+
+    for variable in sorted(by_variable):
+        accumulator = by_variable[variable]
+        # Median and spread come from the reservoir, which is a uniform sample. Taking them
+        # from tail_sample would let the retained tails drag both.
+        body = accumulator.body_sample()
+        low, high, scale = robust_log_cut(body, args.z)
+        positive = body[body > 0]
+        centre = float(np.median(np.log10(positive))) if positive.size else np.nan
+        observed_low, observed_high = accumulator.surviving(-np.inf, np.inf)
+        removed, saturated = accumulator.beyond(low, high)
+        smallest, largest = accumulator.surviving(low, high)
+        seen = accumulator.positive_count
+        share = removed / seen if seen else 0.0
+        marker = '  <-- inspect' if share > args.warn_fraction else ''
+        if saturated:
+            marker = '  <-- SATURATED, removing far too much'
+        elif not np.isfinite(scale) or scale == 0:
+            marker = '  <-- no usable spread'
+        print(f'{variable[:33]:<34}{_number(scale):>10}'
+              f'{_number(robust_log_z(observed_low, centre, scale)):>10}'
+              f'{_number(robust_log_z(observed_high, centre, scale)):>10}'
+              f'{("none" if low == -np.inf else f"{low:.4g}"):>12}'
+              f'{_number(smallest):>12}{_number(largest):>13}'
+              f'{("none" if high == np.inf else f"{high:.4g}"):>13}'
+              f'{removed:>10,}{share:>9.4%}{marker}')
+    print('-' * ROBUST_WIDTH)
+    print('  spread is one robust spread in decades; z(min) and z(max) are where the most '
+          'extreme\n  observed values sit in those units, before any cut.')
+
+
+def report_unloggable(by_variable, args):
+    """Zeros and negatives, which neither log rule can see or remove.
+
+    A zero is usually a sentinel for a measurement that was not taken, but for some
+    variables it is a real reading, and the share separates the two: a handful among tens of
+    thousands is a sentinel, a substantial mode is the variable.
+    """
+    rows = [(name, a) for name, a in sorted(by_variable.items()) if a.zeros or a.negatives]
+    print(f'\n{"=" * 100}')
+    print('BELOW THE LOG  (values the tail-gap and robust-spread rules cannot see)')
+    print('=' * 100)
+    if not rows:
+        print('\n  Every observed value is positive.')
+        return
+    print(f'{"variable":<34}{"observed":>12}{"zeros":>10}{"%":>10}{"negatives":>12}{"%":>10}')
+    print('-' * 100)
+    for name, a in rows:
+        print(f'{name[:33]:<34}{a.count:>12,}{a.zeros:>10,}{a.zeros / a.count:>10.3%}'
+              f'{a.negatives:>12,}{a.negatives / a.count:>10.3%}')
+    print('-' * 100)
+    print('  A negative reading means a cleaner ran in the wrong order: remove_negative_values\n'
+          '  is applied before the unit conversions that can produce one.')
 
 
 UNDECLARED = '(not declared)'
@@ -404,6 +533,9 @@ def main():
                              'factor of about three.')
     parser.add_argument('--quantile', type=float, default=0.999)
     parser.add_argument('--min_fold', type=float, default=3.0)
+    parser.add_argument('--z', type=float, default=8.0,
+                        help='Robust spreads from the median, in log space, beyond which '
+                             'the second rule cuts.')
     parser.add_argument('--warn_fraction', type=float, default=0.001,
                         help='Flag a variable whose cut removes more than this share.')
     parser.add_argument('--warn_ratio', type=float, default=1.5,
@@ -421,6 +553,8 @@ def main():
         raise SystemExit('no events were read; check the subjects root and the variable map')
 
     report_tail_gap(by_variable, args)
+    report_robust_log(by_variable, args)
+    report_unloggable(by_variable, args)
     report_unit_audit(by_itemid, var_map, args)
 
 

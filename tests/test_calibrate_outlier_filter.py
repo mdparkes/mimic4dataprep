@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
     Accumulator, EXTREMES, RESERVOIR, UNDECLARED, declared_unit, numeric_values,
-    report_unit_audit, tail_gap_cut)
+    report_unit_audit, robust_log_cut, robust_log_z, tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -289,3 +289,61 @@ def test_an_itemid_with_no_declared_unit_is_reported_separately(capsys):
     out = capsys.readouterr().out
     assert 'declare a unit for some itemids and none for others' in out
     assert '226512' in out
+
+
+def spread_cut(values, k=8.0):
+    return robust_log_cut(np.asarray(values, dtype=float), k)
+
+
+def test_the_threshold_scales_to_the_variables_own_spread():
+    """The same k must mean something different inoriginal units for a tight and a wide variable."""
+    rng = np.random.default_rng(0)
+    tight = rng.normal(36.9, 0.7, 20000)
+    wide = rng.lognormal(np.log(30), 1.0, 20000)
+    _, tight_high, _ = spread_cut(tight)
+    _, wide_high, _ = spread_cut(wide)
+    assert tight_high < 60          # a temperature of 60 is not a temperature
+    assert wide_high > 5000         # an ALT of 5000 is an acute liver injury
+
+
+def test_a_continuous_heavy_tail_survives_where_a_tight_variable_is_cut():
+    """Both values sit the same number of decades out; only the spread tells them apart."""
+    rng = np.random.default_rng(1)
+    tight = np.concatenate([rng.normal(36.9, 0.7, 20000), [530.6]])
+    wide = np.concatenate([rng.lognormal(np.log(30), 1.0, 20000), [13960.0]])
+    assert spread_cut(tight)[1] < 530.6
+    assert spread_cut(wide)[1] > 13960.0
+
+
+def test_a_bridging_value_does_not_save_an_outlier_from_the_spread_rule():
+    """The case the gap rule loses: one value between the body and a far one."""
+    rng = np.random.default_rng(2)
+    bridged = np.concatenate([rng.normal(36.9, 0.7, 20000), [110.0, 250.0, 530.6]])
+    assert tail_gap_cut(bridged, gap=0.5, quantile=0.999, min_fold=3.0)[1] == np.inf
+    assert spread_cut(bridged)[1] < 110.0
+
+
+def test_too_few_values_cuts_nothing_and_reports_no_spread():
+    low, high, scale = spread_cut(np.full(50, 5.0))
+    assert (low, high) == (-np.inf, np.inf)
+    assert np.isnan(scale)
+
+
+def test_a_variable_with_no_spread_at_all_cuts_nothing():
+    low, high, scale = spread_cut(np.full(500, 5.0))
+    assert (low, high) == (-np.inf, np.inf)
+    assert scale == 0.0
+
+
+def test_z_is_undefined_where_the_log_rules_cannot_look():
+    assert np.isnan(robust_log_z(0.0, 1.5, 0.01))
+    assert np.isnan(robust_log_z(-17.78, 1.5, 0.01))
+    assert np.isnan(robust_log_z(100.0, 1.5, 0.0))
+
+
+def test_zeros_and_negatives_are_counted_but_not_charged_to_the_cut():
+    accumulator = loaded(np.concatenate([np.full(900, 37.0), np.zeros(60), np.full(40, -17.78)]))
+    assert (accumulator.zeros, accumulator.negatives) == (60, 40)
+    assert accumulator.positive_count == 900
+    removed, _ = accumulator.beyond(30.0, 45.0)
+    assert removed == 0
