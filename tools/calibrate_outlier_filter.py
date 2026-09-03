@@ -366,6 +366,92 @@ def report_tail_gap(by_variable, args):
           f'wants looking at before the rule is adopted.')
 
 
+def print_reading_guide(args):
+    """What the report measures and how to act on it, ahead of the tables themselves."""
+    print(f'{"=" * 100}')
+    print('HOW TO READ THIS')
+    print('=' * 100)
+    print(f"""
+Nothing here is applied to any data. Two candidate outlier rules are measured against the
+extracted events, and this reports what each would remove, so a threshold can be chosen from
+evidence before anything is wired into cleaners.py.
+
+THE TWO RULES
+
+  tail gap    Sorts the log values and cuts at the first jump wider than --gap decades
+              (currently {args.gap}). A real tail is continuous however far it runs, while errors
+              from decimal slips, unit slips and sentinels sit in a separate cluster orders of
+              magnitude out. Two weaknesses: one erroneous value lying between the body and a
+              far one bridges the gap that was supposed to separate them, and the --min_fold
+              guard (currently {args.min_fold}) is a fixed multiple of the median, which for
+              a tight variable floors the search above the values it needed to reach.
+
+  robust      Cuts at --z robust spreads from the median, in log space (currently {args.z}).
+  spread      Nothing bridges anything, and the threshold scales to each variable.
+
+HOW THE ROBUST SPREAD RULE WORKS
+
+  For one variable, over its positive values v, with y = log10(v):
+
+      m    = median(y)                      the centre, in decades
+      s    = 1.4826 * median(|y - m|)       one robust spread, in decades
+      z(v) = (log10(v) - m) / s             distance from the centre, in spreads
+
+  The rule keeps |z| <= k, which in original units is a cut at 10^(m +/- k*s).
+
+  s is measured per variable, so a single k means something different for each. Illustrative
+  figures for a tight variable and a wide one, both at k = 8:
+
+      Temperature   median 36.9   s = 0.008 decades   one spread = 1.02x   ->  cut at 42.9
+      ALT           median 29.9   s = 0.433 decades   one spread = 2.71x   ->  cut at 87000
+
+  Nothing was told that 43 degrees is implausible or that 87000 U/L is reachable. Both follow
+  from the spread of each variable's own body.
+
+  A median absolute deviation is used rather than a standard deviation because the values being
+  looked for would inflate an SD and so help hide themselves. The 1.4826 rescales the MAD to
+  match a standard deviation on normal data, so k reads as a number of sigmas.
+
+CHOOSING --z
+
+  z(min) and z(max) in the ROBUST LOG SPREAD table are measured on the observed values before
+  any cut. They do not depend on --z and are identical in every run. Each says how many spreads
+  the most extreme observed value sits from the centre.
+
+  Read down the z(max) column and make one judgment per variable -- is that value real?
+
+      a value that is plausible       ->  k must be ABOVE its z
+      a value that is not             ->  k must be BELOW its z
+
+  Each variable narrows the window from one side. Any k inside the surviving window satisfies
+  every judgment made, and one run is enough to find it. Rerun at that k and read the removed
+  column for what it costs.
+
+  If the window closes -- some variable's largest real value sits further out than another
+  variable's worst error -- then no single k separates them and the two want different
+  treatment. That is a result, not a tuning failure.
+
+THE OTHER COLUMNS AND SECTIONS
+
+  min kept / max kept   The surviving extremes under each rule. Read these before the cut
+                        points, which say nothing on their own. An implausible max kept beside
+                        a 'none' cut means the rule was defeated, not satisfied.
+
+  removed / %           Counted against positive values only, since that is all either rule
+                        can act on. Above {args.warn_fraction:.2%} the rule is reaching past errors and
+                        into real values.
+
+  BELOW THE LOG         Zeros and negatives. log10 is undefined there, so both rules drop them
+                        before searching and neither can report on them. A small share is a
+                        sentinel for a measurement not taken; a large one is the variable
+                        itself. A negative reading means a cleaner ran in the wrong order.
+
+  UNIT AUDIT            Conflicts are read from the declared UNITNAME in the variable map, so
+                        they are exact and need no threshold. The medians beneath a conflict
+                        only say whether the conversion actually ran.
+""")
+
+
 ROBUST_WIDTH = 133
 
 
@@ -546,6 +632,8 @@ def main():
 
     if not os.path.isdir(args.subjects_root):
         raise SystemExit(f'{args.subjects_root} is not a directory')
+
+    print_reading_guide(args)
 
     var_map = read_itemid_to_variable_map(args.variable_map_file)
     by_variable, by_itemid = collect(args.subjects_root, var_map, args.subjects, args.seed)

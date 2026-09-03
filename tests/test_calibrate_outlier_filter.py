@@ -16,7 +16,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
     Accumulator, EXTREMES, RESERVOIR, UNDECLARED, declared_unit, numeric_values,
-    report_unit_audit, robust_log_cut, robust_log_z, tail_gap_cut)
+    print_reading_guide, report_unit_audit, robust_log_cut, robust_log_z,
+    tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -347,3 +348,29 @@ def test_zeros_and_negatives_are_counted_but_not_charged_to_the_cut():
     assert accumulator.positive_count == 900
     removed, _ = accumulator.beyond(30.0, 45.0)
     assert removed == 0
+
+
+def guide_lines(**overrides):
+    import argparse
+    settings = dict(gap=0.5, min_fold=3.0, z=8.0, warn_fraction=0.001)
+    settings.update(overrides)
+    import io as _io, contextlib
+    buffer = _io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        print_reading_guide(argparse.Namespace(**settings))
+    return buffer.getvalue().splitlines()
+
+
+def test_the_guide_fits_the_width_of_the_tables():
+    assert max(len(line) for line in guide_lines()) <= 100
+
+
+def test_the_guide_states_the_settings_the_run_actually_used():
+    text = '\n'.join(guide_lines(gap=0.75, min_fold=5.0, z=11.0))
+    assert 'currently 0.75' in text
+    assert 'currently 5.0' in text
+    assert 'currently 11.0' in text
+
+
+def test_the_guide_survives_a_warn_fraction_of_a_different_width():
+    assert max(len(line) for line in guide_lines(warn_fraction=0.025)) <= 100
