@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
     Accumulator, EXTREMES, RESERVOIR, UNDECLARED, declared_unit, numeric_values,
     print_reading_guide, report_unit_audit, robust_log_cut, robust_log_z,
-    tail_gap_cut)
+    standardized_extent, standardized_scale, tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -352,7 +352,7 @@ def test_zeros_and_negatives_are_counted_but_not_charged_to_the_cut():
 
 def guide_lines(**overrides):
     import argparse
-    settings = dict(gap=0.5, min_fold=3.0, z=8.0, warn_fraction=0.001)
+    settings = dict(gap=0.5, min_fold=3.0, z=8.0, u=20.0, warn_fraction=0.001)
     settings.update(overrides)
     import io as _io, contextlib
     buffer = _io.StringIO()
@@ -374,3 +374,58 @@ def test_the_guide_states_the_settings_the_run_actually_used():
 
 def test_the_guide_survives_a_warn_fraction_of_a_different_width():
     assert max(len(line) for line in guide_lines(warn_fraction=0.025)) <= 100
+
+
+def scale_of(values):
+    return standardized_scale(np.asarray(values, dtype=float))
+
+
+def test_the_scale_is_the_percentile_range_standardize_feats_divides_by():
+    centre, scale = scale_of(np.arange(1, 1001, dtype=float))
+    assert centre == pytest.approx(500.5)
+    assert scale == pytest.approx(np.percentile(np.arange(1, 1001), 95)
+                                  - np.percentile(np.arange(1, 1001), 5))
+
+
+def test_the_two_scales_disagree_on_a_tightly_regulated_variable():
+    """A MAD spans the regulated core; p95-p5 spans the observed clinical range. For a
+    variable held to a narrow band, real pathology reads as further out on the first."""
+    rng = np.random.default_rng(3)
+    sodium = rng.normal(139, 4.5, 63000)
+    log_centre = float(np.median(np.log10(sodium)))
+    _, _, log_scale = robust_log_cut(sodium, 8.0)
+    centre, scale = scale_of(sodium)
+    assert robust_log_z(175.0, log_centre, log_scale) > 2 * standardized_extent(
+        175.0, centre, scale)
+
+
+def test_a_sentinel_reads_as_extreme_on_both_scales():
+    """What the run actually found: eight lab variables topping out near 1e6."""
+    rng = np.random.default_rng(4)
+    sodium = rng.normal(139, 4.5, 63000)
+    log_centre = float(np.median(np.log10(sodium)))
+    _, _, log_scale = robust_log_cut(sodium, 8.0)
+    centre, scale = scale_of(sodium)
+    assert robust_log_z(999999.0, log_centre, log_scale) > 100
+    assert standardized_extent(999999.0, centre, scale) > 100
+
+
+def test_a_variable_with_no_percentile_range_has_no_usable_scale():
+    centre, scale = scale_of(np.full(500, 7.0))
+    assert centre == 7.0
+    assert np.isnan(scale)
+
+
+def test_too_few_values_give_no_scale():
+    assert all(np.isnan(v) for v in scale_of(np.arange(50, dtype=float)))
+
+
+def test_standardized_extent_is_undefined_without_a_scale():
+    assert np.isnan(standardized_extent(100.0, 5.0, np.nan))
+    assert np.isnan(standardized_extent(np.nan, 5.0, 2.0))
+
+
+def test_negatives_are_charged_to_a_rule_that_works_in_original_units():
+    accumulator = loaded(np.concatenate([np.full(900, 37.0), np.full(40, -17.78)]))
+    assert accumulator.beyond(30.0, 45.0)[0] == 0                # log rules never saw them
+    assert accumulator.beyond(30.0, 45.0, positive_only=False)[0] == 40

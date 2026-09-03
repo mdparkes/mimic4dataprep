@@ -160,20 +160,23 @@ class Accumulator:
         """Observations both log rules could actually see."""
         return self.count - self.zeros - self.negatives
 
-    def beyond(self, low, high):
-        """How many positive observations fall outside the cuts.
+    def beyond(self, low, high, positive_only=True):
+        """How many observations fall outside the cuts.
 
         Counted from the retained extremes rather than the reservoir, so it is exact rather
         than sampled -- unless more than EXTREMES values lie beyond a cut, which would mean
         the rule is removing far too much to adopt anyway.
 
-        Zeros and negatives are excluded. Both rules derive their cuts from positive values
-        alone, so counting values they never saw against them reads a variable's sentinel
-        share as if the rule had chosen to remove it. Those are reported on their own.
+        With `positive_only`, zeros and negatives are excluded: the log rules derive their
+        cuts from positive values alone, so counting values they never saw against them
+        reads a variable's sentinel share as if the rule had chosen to remove it. A rule
+        that works in original units sees everything and passes False.
         """
         tail_high, tail_low = self.high, self.low
-        above = int((tail_high[tail_high > 0] > high).sum())
-        below = int((tail_low[tail_low > 0] < low).sum())
+        if positive_only:
+            tail_high, tail_low = tail_high[tail_high > 0], tail_low[tail_low > 0]
+        above = int((tail_high > high).sum())
+        below = int((tail_low < low).sum())
         saturated = (above >= tail_high.size == self.extremes
                      or below >= tail_low.size == self.extremes)
         return above + below, saturated
@@ -387,7 +390,32 @@ THE TWO RULES
               a tight variable floors the search above the values it needed to reach.
 
   robust      Cuts at --z robust spreads from the median, in log space (currently {args.z}).
-  spread      Nothing bridges anything, and the threshold scales to each variable.
+  spread      Nothing bridges anything, and the threshold scales to each variable. Its
+              weakness is what it measures: a MAD spans the regulated core of a variable, not
+              its clinically observed range. Sodium is held to 135-145, so a real 175 reads as
+              hundreds of spreads, while a variable that ranges over orders of magnitude in
+              ordinary illness would hide a gross error in a handful.
+
+  standard-   Cuts beyond --u units of (p95 - p5) from the median (currently {args.u}), the
+  ized        scale standardize_feats divides by. Aimed at a different question: not whether a
+  magnitude   value is clinically possible, but how much of the loss it takes. A value at u
+              costs u^2, so this bounds the damage rather than judging the value.
+
+WHICH QUESTION IS BEING ASKED
+
+  Two objectives are easy to conflate and want different rules:
+
+      (a) remove clinically impossible values
+      (b) stop extreme values from dominating the loss
+
+  (a) is not reachable by a threshold on any single statistic. Real pathology and gross error
+  overlap on every scale-free measure, because how far a variable's plausible range extends
+  beyond its usual one is a fact about physiology, not about its distribution.
+
+  (b) is reachable, and directly measurable, because the harm is not that a value is wrong but
+  that it is large after standardization. A height of 419cm is impossible and costs a loss
+  almost nothing; a temperature of 185000 costs it everything. Those want different responses,
+  and only the standardized magnitude tells them apart.
 
 HOW THE ROBUST SPREAD RULE WORKS
 
@@ -412,13 +440,14 @@ HOW THE ROBUST SPREAD RULE WORKS
   looked for would inflate an SD and so help hide themselves. The 1.4826 rescales the MAD to
   match a standard deviation on normal data, so k reads as a number of sigmas.
 
-CHOOSING --z
+CHOOSING --z OR --u
 
-  z(min) and z(max) in the ROBUST LOG SPREAD table are measured on the observed values before
-  any cut. They do not depend on --z and are identical in every run. Each says how many spreads
-  the most extreme observed value sits from the centre.
+  z(min) and z(max) in the ROBUST LOG SPREAD table, and u(min) and u(max) in the STANDARDIZED
+  MAGNITUDE table, are measured on the observed values before any cut. They do not depend on
+  --z or --u and are identical in every run. Each says how far the most extreme observed value
+  sits from the centre, in that rule's units.
 
-  Read down the z(max) column and make one judgment per variable -- is that value real?
+  Read down the column and make one judgment per variable -- is that value real?
 
       a value that is plausible       ->  k must be ABOVE its z
       a value that is not             ->  k must be BELOW its z
@@ -428,8 +457,11 @@ CHOOSING --z
   column for what it costs.
 
   If the window closes -- some variable's largest real value sits further out than another
-  variable's worst error -- then no single k separates them and the two want different
-  treatment. That is a result, not a tuning failure.
+  variable's worst error -- then no single threshold separates them on that scale. Under
+  objective (a) that is the end of the road. Under (b) it need not be: check what the
+  surviving errors actually cost. An error at u = 7 contributes 49 where a routine residual
+  contributes about 1, which is a rounding error next to the values this exists to remove.
+  Set --u above the largest value you believe rather than below the smallest you do not.
 
 THE OTHER COLUMNS AND SECTIONS
 
@@ -518,6 +550,80 @@ def report_unloggable(by_variable, args):
     print('-' * 100)
     print('  A negative reading means a cleaner ran in the wrong order: remove_negative_values\n'
           '  is applied before the unit conversions that can produce one.')
+
+
+STANDARDIZED_WIDTH = 145
+
+
+def standardized_scale(body):
+    """The centre and scale TransEHR2 standardizes with, measured robustly.
+
+    `standardize_feats` divides by the 5th-to-95th percentile range, so that range is the
+    unit a value is expressed in by the time a loss is computed on it. Unlike a MAD, it spans
+    the clinically observed range rather than the regulated core, which is what a rule needs
+    if real pathology is not to read as extreme.
+
+    The centre is the median rather than the mean the model uses. A mean is dragged by the
+    very values being looked for, so a diagnostic that used one would understate exactly the
+    outliers it exists to find.
+    """
+    if body.size < 100:
+        return np.nan, np.nan
+    low, high = np.percentile(body, [5, 95])
+    scale = float(high - low)
+    return float(np.median(body)), (scale if scale > 0 else np.nan)
+
+
+def standardized_extent(value, centre, scale):
+    """How large a value is once standardized: the magnitude the loss actually sees."""
+    if not np.isfinite(value) or not np.isfinite(scale):
+        return np.nan
+    return (value - centre) / scale
+
+
+def report_standardized(by_variable, args):
+    """Per variable, the observed extremes in the units the model standardizes to.
+
+    This is the only one of the three rules aimed at the harm rather than at clinical
+    validity: an implausible value that standardizes to single digits costs a loss nothing,
+    while one that standardizes to thousands dominates every step it appears in.
+    """
+    print(f'\n{"=" * STANDARDIZED_WIDTH}')
+    print(f'STANDARDIZED MAGNITUDE  (cut beyond {args.u} units of (p95 - p5) from the median, '
+          f'the scale standardize_feats uses)')
+    print('=' * STANDARDIZED_WIDTH)
+    print(f'{"variable":<34}{"median":>10}{"p95 - p5":>12}{"u(min)":>11}{"u(max)":>11}'
+          f'{"low cut":>12}{"min kept":>12}{"max kept":>13}{"high cut":>13}{"removed":>10}'
+          f'{"%":>9}')
+    print('-' * STANDARDIZED_WIDTH)
+
+    for variable in sorted(by_variable):
+        accumulator = by_variable[variable]
+        centre, scale = standardized_scale(accumulator.body_sample())
+        observed_low, observed_high = accumulator.surviving(-np.inf, np.inf)
+        if not np.isfinite(scale):
+            low, high = -np.inf, np.inf
+        else:
+            low, high = centre - args.u * scale, centre + args.u * scale
+        removed, saturated = accumulator.beyond(low, high, positive_only=False)
+        smallest, largest = accumulator.surviving(low, high)
+        share = removed / accumulator.count if accumulator.count else 0.0
+        marker = '  <-- inspect' if share > args.warn_fraction else ''
+        if saturated:
+            marker = '  <-- SATURATED, removing far too much'
+        elif not np.isfinite(scale):
+            marker = '  <-- no usable spread'
+        print(f'{variable[:33]:<34}{_number(centre):>10}{_number(scale):>12}'
+              f'{_number(standardized_extent(observed_low, centre, scale)):>11}'
+              f'{_number(standardized_extent(observed_high, centre, scale)):>11}'
+              f'{("none" if low == -np.inf else f"{low:.4g}"):>12}'
+              f'{_number(smallest):>12}{_number(largest):>13}'
+              f'{("none" if high == np.inf else f"{high:.4g}"):>13}'
+              f'{removed:>10,}{share:>9.4%}{marker}')
+    print('-' * STANDARDIZED_WIDTH)
+    print('  u(min) and u(max) are the observed extremes in standardized units, before any\n'
+          '  cut. A value at u costs the loss u^2, so these say what each variable is\n'
+          '  contributing rather than whether it is clinically possible.')
 
 
 UNDECLARED = '(not declared)'
@@ -622,6 +728,9 @@ def main():
     parser.add_argument('--z', type=float, default=8.0,
                         help='Robust spreads from the median, in log space, beyond which '
                              'the second rule cuts.')
+    parser.add_argument('--u', type=float, default=20.0,
+                        help='Units of (p95 - p5) from the median beyond which the third '
+                             'rule cuts.')
     parser.add_argument('--warn_fraction', type=float, default=0.001,
                         help='Flag a variable whose cut removes more than this share.')
     parser.add_argument('--warn_ratio', type=float, default=1.5,
@@ -642,6 +751,7 @@ def main():
 
     report_tail_gap(by_variable, args)
     report_robust_log(by_variable, args)
+    report_standardized(by_variable, args)
     report_unloggable(by_variable, args)
     report_unit_audit(by_itemid, var_map, args)
 
