@@ -195,3 +195,27 @@ def test_missing_and_non_finite_values_are_dropped():
         ('Glucose', 220621, '6.0'),
     ]))
     assert kept['VALUE'].to_numpy(dtype=float) == pytest.approx([6.0])
+
+
+def loaded(values):
+    accumulator = Accumulator()
+    accumulator.add(np.asarray(values, dtype=float))
+    return accumulator
+
+
+def test_surviving_reports_the_observed_range_when_nothing_is_cut():
+    accumulator = loaded([1.0, 5.0, 50.0, 900.0])
+    assert accumulator.surviving(-np.inf, np.inf) == (1.0, 900.0)
+
+
+def test_surviving_stops_at_the_last_value_inside_the_cuts():
+    accumulator = loaded([0.1, 1.0, 5.0, 50.0, 900.0, 90000.0])
+    smallest, largest = accumulator.surviving(0.5, 5000.0)
+    assert (smallest, largest) == (1.0, 900.0)
+
+
+def test_surviving_is_nan_when_a_cut_excludes_every_retained_value():
+    accumulator = loaded([100.0, 200.0, 300.0])
+    smallest, largest = accumulator.surviving(-np.inf, 1.0)
+    assert smallest == 100.0
+    assert np.isnan(largest)

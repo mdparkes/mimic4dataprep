@@ -127,6 +127,20 @@ class Accumulator:
         """The reservoir alone: a uniform sample of every value seen, for quantiles."""
         return self.reservoir
 
+    def surviving(self, low, high):
+        """The smallest and largest values the cuts would keep, in original units.
+
+        The cuts alone do not say how much room is left between them and the data -- a high
+        cut of 4500 on a variable whose largest real value is 22 is a different proposition
+        from one whose largest is 4000. Read off the retained tails, so exact under the same
+        condition as `beyond`, and NaN on the side where saturation put the answer outside
+        the retained values.
+        """
+        kept_low = self.low[self.low >= low]
+        kept_high = self.high[self.high <= high]
+        return (float(kept_low.min()) if kept_low.size else np.nan,
+                float(kept_high.max()) if kept_high.size else np.nan)
+
     def beyond(self, low, high):
         """Exactly how many observed values fall outside the cuts.
 
@@ -249,15 +263,23 @@ def collect(subjects_root, var_map, n_subjects, seed):
     return by_variable, by_itemid
 
 
+TAIL_GAP_WIDTH = 124
+
+
+def _number(value):
+    """A table cell for a value that may not exist, when a saturated tail hid it."""
+    return 'n/a' if not np.isfinite(value) else f'{value:.4g}'
+
+
 def report_tail_gap(by_variable, args):
     """Per variable, where the rule would cut and how much it would remove."""
-    print(f'\n{"=" * 100}')
+    print(f'\n{"=" * TAIL_GAP_WIDTH}')
     print(f'TAIL GAP  (gap > {args.gap} decades, beyond q{args.quantile}, '
           f'no closer than {args.min_fold}x the median)')
-    print('=' * 100)
-    print(f'{"variable":<34}{"observed":>11}{"median":>11}{"low cut":>12}{"high cut":>14}'
-          f'{"removed":>10}{"%":>8}')
-    print('-' * 100)
+    print('=' * TAIL_GAP_WIDTH)
+    print(f'{"variable":<34}{"observed":>11}{"median":>10}{"low cut":>12}{"min kept":>12}'
+          f'{"max kept":>13}{"high cut":>13}{"removed":>10}{"%":>9}')
+    print('-' * TAIL_GAP_WIDTH)
 
     for variable in sorted(by_variable):
         accumulator = by_variable[variable]
@@ -268,14 +290,15 @@ def report_tail_gap(by_variable, args):
         marker = '  <-- inspect' if share > args.warn_fraction else ''
         if saturated:
             marker = '  <-- SATURATED, removing far too much'
+        smallest, largest = accumulator.surviving(low, high)
         print(f'{variable[:33]:<34}{accumulator.count:>11,}'
-              f'{np.median(accumulator.body_sample()):>11.3g}'
+              f'{np.median(accumulator.body_sample()):>10.3g}'
               f'{("none" if low == -np.inf else f"{low:.4g}"):>12}'
-              f'{("none" if high == np.inf else f"{high:.4g}"):>14}'
-              f'{removed:>10,}{share:>8.4%}{marker}')
-    print('-' * 100)
-    print(f'  Counts are exact while a tail holds fewer than its cap of retained values. '
-          f'in full.')
+              f'{_number(smallest):>12}{_number(largest):>13}'
+              f'{("none" if high == np.inf else f"{high:.4g}"):>13}'
+              f'{removed:>10,}{share:>9.4%}{marker}')
+    print('-' * TAIL_GAP_WIDTH)
+    print(f'  Counts are exact while a tail holds fewer than its cap of retained values.')
     print(f'  Anything above {args.warn_fraction:.2%} is removing more than errors and '
           f'wants looking at before the rule is adopted.')
 
