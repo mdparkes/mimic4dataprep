@@ -262,19 +262,23 @@ def clean_events(events: pd.DataFrame, var_map: pd.DataFrame,
 
 
     # Associate variables with cleaning pipelines to be executed by DataCleaner
+    numeric_itemids = []
     for (name, type), info in grouped_vars:
 
         if type == 'Numeric':
             for tup in info.itertuples(index=False):
                 itemid = tup.ITEMID
                 unitname = tup.UNITNAME
-                # Cleaners applied to all numeric variables
+                # Cleaners applied to all numeric variables. remove_negative_values is
+                # appended after the unit conversions below rather than here: an affine
+                # conversion can turn a non-negative reading negative, so a filter placed
+                # ahead of it passes the value and then never sees the result.
+                numeric_itemids.append(itemid)
                 dc.add_variable(
                     variable_name=itemid,
                     cleaners=[
                         'remove_nonnumeric_strings',
-                        'cast_as_float',
-                        'remove_negative_values'
+                        'cast_as_float'
                     ]
                 )
                 # Additional cleaners applied to percentages
@@ -347,6 +351,18 @@ def clean_events(events: pd.DataFrame, var_map: pd.DataFrame,
         ],
         append_cleaners=True  # Append to previously added cleaners
     )
+
+    # Last of the per-value cleaners, so that a conversion cannot produce a negative that
+    # nothing goes on to remove. A temperature recorded as 0 F is the case in point: it
+    # passes a negative filter placed before convert_f_to_c and leaves it as -17.78 C.
+    for itemid in numeric_itemids:
+        dc.update_variable(
+            variable_name=itemid,
+            cleaners=[
+                'remove_negative_values'
+            ],
+            append_cleaners=True  # Append to previously added cleaners
+        )
 
     # Apply the cleaning pipelines
     cleaned_events = dc(events, value_column='VALUE', variable_column='ITEMID')
