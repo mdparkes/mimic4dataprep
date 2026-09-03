@@ -12,9 +12,11 @@ per-variable knowledge:
                 cut point adapts per variable, so nothing has to be told how far a real tail
                 runs.
 
-    unit audit  Compare each ITEMID's median against its variable's. A whole ITEMID recorded in
-                the wrong unit is invisible per value -- every reading is a plausible number --
-                but it moves the entire distribution, so it shows up as a median ratio.
+    unit audit  Read the declared UNITNAME of every ITEMID pooled under one VARIABLE. An
+                ITEMID recorded in a unit nothing converts is invisible per value -- every
+                reading is a plausible number -- but it shifts the whole distribution. The map
+                declares the unit, so this needs no threshold; the observed medians are then
+                used only to say whether the conversion actually ran.
 
 Neither rule is applied here. This reports what they would do, so the thresholds can be set from
 evidence before anything is wired into `cleaners.py`.
@@ -303,43 +305,91 @@ def report_tail_gap(by_variable, args):
           f'wants looking at before the rule is adopted.')
 
 
-def report_unit_audit(by_variable, by_itemid, args):
-    """Per itemid, the median ratio against its variable. A whole itemid in the wrong unit
-    moves its entire distribution, which no per-value rule can see."""
+UNDECLARED = '(not declared)'
+
+
+def declared_unit(value):
+    """One itemid's unit, normalised for comparison."""
+    text = '' if value is None else str(value).strip()
+    if not text or text.lower() in ('nan', 'none'):
+        return UNDECLARED
+    return text.casefold()
+
+
+def report_unit_audit(by_itemid, var_map, args):
+    """Per variable, whether its itemids declare more than one unit in the variable map.
+
+    An itemid recorded in a unit the cleaners do not convert moves its entire distribution,
+    which no per-value rule can see. Comparing itemid medians does not find it: a median
+    ratio is produced just as readily by a different collection interval or a sicker
+    subpopulation, and those are the majority of what it flags. The map already declares the
+    unit, so the conflict is read from there, exactly and without a threshold.
+
+    Medians still appear, but only inside a group already known to declare mixed units, and
+    only to answer a second question the map cannot: whether the conversion actually ran.
+    Values reaching here have been through `clean_events`, so agreeing medians mean the
+    conversion is in place and diverging medians mean it is missing.
+    """
     print(f'\n{"=" * 100}')
-    print(f'UNIT AUDIT  (itemid median vs variable median, flagged beyond {args.warn_ratio}x)')
+    print('UNIT AUDIT  (declared UNITNAME per itemid, from the variable map)')
     print('=' * 100)
 
-    flagged = 0
-    for variable in sorted(by_variable):
-        variable_median = float(np.median(by_variable[variable].body_sample()))
-        if not np.isfinite(variable_median) or variable_median == 0:
+    observed = {itemid: accumulator for (_, itemid), accumulator in by_itemid.items()}
+    rows = var_map.reset_index()
+    conflicts, undeclared = 0, []
+
+    for variable, group in rows.groupby('VARIABLE'):
+        entries = []
+        for row in group.itertuples(index=False):
+            accumulator = observed.get(row.ITEMID)
+            entries.append((
+                declared_unit(getattr(row, 'UNITNAME', None)),
+                row.ITEMID,
+                str(getattr(row, 'LABEL', '')),
+                accumulator.count if accumulator is not None else 0,
+                float(np.median(accumulator.body_sample())) if accumulator is not None
+                else np.nan,
+            ))
+
+        units = {unit for unit, *_ in entries}
+        real = units - {UNDECLARED}
+        # Collected whatever the rest of the variable looks like, so the list of map
+        # omissions is complete rather than only covering variables with no conflict.
+        if real and UNDECLARED in units:
+            undeclared.append((variable, [e for e in entries if e[0] == UNDECLARED]))
+        if len(real) < 2:
             continue
-        entries = [(itemid, accumulator) for (name, itemid), accumulator in by_itemid.items()
-                   if name == variable]
-        if len(entries) < 2:
+
+        conflicts += 1
+        print(f'\n  {variable}   {len(real)} declared units')
+        for unit, itemid, label, count, median in sorted(entries):
+            print(f'    {unit:<10}{itemid:<9}{label[:30]:<32}{count:>10,} values'
+                  f'   median {_number(median):>10}')
+
+        seen = [(unit, median) for unit, _, _, count, median in entries
+                if count and np.isfinite(median) and unit != UNDECLARED]
+        if len({unit for unit, _ in seen}) < 2:
+            print('    -> only one of these units was observed; nothing to compare')
             continue
-        rows = []
-        for itemid, accumulator in entries:
-            median = float(np.median(accumulator.body_sample()))
-            ratio = median / variable_median
-            if not (1 / args.warn_ratio < ratio < args.warn_ratio):
-                rows.append((itemid, accumulator.count, median, ratio))
-        if rows:
-            flagged += len(rows)
-            print(f'\n  {variable}   variable median {variable_median:.4g}')
-            for itemid, count, median, ratio in sorted(rows, key=lambda r: -abs(r[3])):
-                print(f'    itemid {itemid:<10}{count:>10,} values   median {median:>12.4g}'
-                      f'   {ratio:>8.2f}x')
-    if not flagged:
-        print('\n  No itemid median departs from its variable by more than '
-              f'{args.warn_ratio}x.')
-    else:
-        print(f'\n  {flagged} itemid(s) flagged. A consistent multiple is a unit the cleaners '
-              f'did not convert.\n  The variable median sits in whichever mode has more '
-              f'values, so the flagged itemid is the\n  minority one and not necessarily the '
-              f'wrong one -- check both against UNITNAME in the\n  variable map before '
-              f'changing anything.')
+        medians = [median for _, median in seen]
+        spread = max(medians) / min(medians) if min(medians) > 0 else np.inf
+        if spread <= args.warn_ratio:
+            print(f'    -> post-cleaning medians agree within {spread:.2f}x, '
+                  f'so the conversion is in place')
+        else:
+            print(f'    -> post-cleaning medians still differ by {spread:.2f}x, '
+                  f'so the conversion is MISSING')
+
+    if not conflicts:
+        print('\n  No variable pools itemids that declare different units.')
+
+    if undeclared:
+        print(f'\n  {len(undeclared)} variable(s) declare a unit for some itemids and none '
+              f'for others.\n  Not a conflict on its own -- an omission in the map, which '
+              f'hides one if a unit differs:')
+        for variable, entries in undeclared:
+            names = ', '.join(f'{itemid} ({label[:28]})' for _, itemid, label, _, _ in entries)
+            print(f'    {variable}: {names}')
 
 
 def main():
@@ -356,7 +406,10 @@ def main():
     parser.add_argument('--min_fold', type=float, default=3.0)
     parser.add_argument('--warn_fraction', type=float, default=0.001,
                         help='Flag a variable whose cut removes more than this share.')
-    parser.add_argument('--warn_ratio', type=float, default=1.5)
+    parser.add_argument('--warn_ratio', type=float, default=1.5,
+                        help='Within a variable that declares mixed units, how far the '
+                             'post-conversion medians may differ before the conversion is '
+                             'called missing.')
     args = parser.parse_args()
 
     if not os.path.isdir(args.subjects_root):
@@ -368,7 +421,7 @@ def main():
         raise SystemExit('no events were read; check the subjects root and the variable map')
 
     report_tail_gap(by_variable, args)
-    report_unit_audit(by_variable, by_itemid, args)
+    report_unit_audit(by_itemid, var_map, args)
 
 
 if __name__ == '__main__':

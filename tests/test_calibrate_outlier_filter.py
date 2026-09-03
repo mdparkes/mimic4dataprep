@@ -15,7 +15,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
-    Accumulator, EXTREMES, RESERVOIR, numeric_values, tail_gap_cut)
+    Accumulator, EXTREMES, RESERVOIR, UNDECLARED, declared_unit, numeric_values,
+    report_unit_audit, tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -219,3 +220,72 @@ def test_surviving_is_nan_when_a_cut_excludes_every_retained_value():
     smallest, largest = accumulator.surviving(-np.inf, 1.0)
     assert smallest == 100.0
     assert np.isnan(largest)
+
+
+@pytest.mark.parametrize('given', [None, '', '   ', float('nan'), 'nan', 'None'])
+def test_a_blank_unitname_is_undeclared(given):
+    assert declared_unit(given) == UNDECLARED
+
+
+def test_unitnames_compare_ignoring_case_and_padding():
+    assert declared_unit(' mL ') == declared_unit('ml')
+
+
+def unit_map(rows):
+    return pd.DataFrame(
+        [(itemid, variable, label, unit) for variable, itemid, label, unit in rows],
+        columns=['ITEMID', 'VARIABLE', 'LABEL', 'UNITNAME']).set_index('ITEMID')
+
+
+def audit(rows, medians, warn_ratio=1.5):
+    by_itemid = {}
+    for itemid, centre in medians.items():
+        variable = next(r[0] for r in rows if r[1] == itemid)
+        by_itemid[(variable, itemid)] = loaded(np.full(500, float(centre)))
+    import argparse
+    report_unit_audit(by_itemid, unit_map(rows), argparse.Namespace(warn_ratio=warn_ratio))
+
+
+URINE = [
+    ('Urine output', 226559, 'Foley', 'mL'),
+    ('Urine output', 226631, 'PACU Urine', 'mL'),
+    ('Urine output', 226567, 'Straight Cath', 'mL'),
+]
+WEIGHT = [
+    ('Weight', 224639, 'Daily Weight', 'kg'),
+    ('Weight', 226531, 'Admission Weight (lbs.)', 'lb'),
+]
+
+
+def test_one_unit_is_never_flagged_however_far_the_medians_diverge(capsys):
+    audit(URINE, {226559: 100, 226631: 700, 226567: 500})
+    out = capsys.readouterr().out
+    assert 'No variable pools itemids that declare different units.' in out
+    assert 'Urine output' not in out
+
+
+def test_mixed_units_with_agreeing_medians_read_as_converted(capsys):
+    audit(WEIGHT, {224639: 79.8, 226531: 80.1})
+    out = capsys.readouterr().out
+    assert 'Weight' in out
+    assert 'the conversion is in place' in out
+
+
+def test_mixed_units_with_diverging_medians_read_as_missing(capsys):
+    audit(WEIGHT, {224639: 79.8, 226531: 176.0})
+    assert 'the conversion is MISSING' in capsys.readouterr().out
+
+
+def test_a_unit_observed_alone_is_not_judged(capsys):
+    audit(WEIGHT, {224639: 79.8})
+    out = capsys.readouterr().out
+    assert 'only one of these units was observed' in out
+    assert 'conversion is' not in out
+
+
+def test_an_itemid_with_no_declared_unit_is_reported_separately(capsys):
+    rows = WEIGHT + [('Weight', 226512, 'Admission Weight', None)]
+    audit(rows, {224639: 79.8, 226531: 80.1, 226512: 80.0})
+    out = capsys.readouterr().out
+    assert 'declare a unit for some itemids and none for others' in out
+    assert '226512' in out
