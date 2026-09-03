@@ -10,11 +10,12 @@ import os
 import sys
 
 import numpy as np
+import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
-    Accumulator, EXTREMES, RESERVOIR, tail_gap_cut)
+    Accumulator, EXTREMES, RESERVOIR, numeric_values, tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -162,3 +163,35 @@ class TestAccumulatorScales:
         accumulator.add(np.array([5.0, 6.0]))
         accumulator.add(np.array([1e6]))
         assert accumulator.high.max() == pytest.approx(1e6)
+
+
+def frame(rows):
+    return pd.DataFrame(rows, columns=['VARIABLE', 'ITEMID', 'VALUE'])
+
+
+def test_a_text_variable_is_dropped_rather_than_raising():
+    kept = numeric_values(frame([
+        ('Glucose', 220621, '5.4'),
+        ('Discharge note', 900001, 'patient stable overnight'),
+        ('Discharge note', 900001, ''),
+    ]))
+    assert list(kept['VARIABLE']) == ['Glucose']
+    assert kept['VALUE'].to_numpy(dtype=float) == pytest.approx([5.4])
+
+
+def test_free_text_in_a_numeric_variable_drops_only_that_row():
+    kept = numeric_values(frame([
+        ('Glucose', 220621, '5.4'),
+        ('Glucose', 220621, 'unable to obtain'),
+        ('Glucose', 220621, 7.1),
+    ]))
+    assert kept['VALUE'].to_numpy(dtype=float) == pytest.approx([5.4, 7.1])
+
+
+def test_missing_and_non_finite_values_are_dropped():
+    kept = numeric_values(frame([
+        ('Glucose', 220621, np.nan),
+        ('Glucose', 220621, np.inf),
+        ('Glucose', 220621, '6.0'),
+    ]))
+    assert kept['VALUE'].to_numpy(dtype=float) == pytest.approx([6.0])

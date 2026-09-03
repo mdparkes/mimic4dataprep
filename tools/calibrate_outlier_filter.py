@@ -34,6 +34,7 @@ import os
 import random
 
 import numpy as np
+import pandas as pd
 
 from mimic4dataprep.cleaners import clean_events
 from mimic4dataprep.preprocessing import map_itemids_to_variables, read_itemid_to_variable_map
@@ -182,6 +183,19 @@ def tail_gap_cut(values, gap, quantile, min_fold):
     return low_cut, high_cut
 
 
+def numeric_values(events):
+    """The VARIABLE/ITEMID/VALUE rows that carry a usable number.
+
+    Coercion is per value, not per column: text variables and free-text entries in an
+    otherwise numeric variable become NaN and drop out here. A whole-column cast raises on
+    the first string, and pandas' errors='ignore' would leave the column untouched,
+    deferring the same failure to the first arithmetic on it.
+    """
+    numeric = events[['VARIABLE', 'ITEMID', 'VALUE']].copy()
+    numeric['VALUE'] = pd.to_numeric(numeric['VALUE'], errors='coerce')
+    return numeric[np.isfinite(numeric['VALUE'].to_numpy(dtype=float))]
+
+
 def read_subject(subject_path, var_map):
     """The cleaned events for one subject, exactly as step 3 would produce them."""
     events = read_events(subject_path)
@@ -204,7 +218,7 @@ def collect(subjects_root, var_map, n_subjects, seed):
         directories = rng.sample(directories, n_subjects)
     print(f'reading {len(directories):,} subjects from {subjects_root}', flush=True)
 
-    by_variable, by_itemid, failures = {}, {}, 0
+    by_variable, by_itemid, failures, seen = {}, {}, 0, set()
     for index, name in enumerate(directories, 1):
         try:
             events = read_subject(os.path.join(subjects_root, name), var_map)
@@ -213,25 +227,25 @@ def collect(subjects_root, var_map, n_subjects, seed):
             continue
         if events is None:
             continue
-        numeric = events[['VARIABLE', 'ITEMID', 'VALUE']].copy()
-        numeric['VALUE'] = numeric['VALUE'].astype(float, errors='ignore')
+        seen.update(events['VARIABLE'].unique())
+        numeric = numeric_values(events)
         for variable, group in numeric.groupby('VARIABLE'):
-            values = group['VALUE'].to_numpy(dtype=float, na_value=np.nan)
-            values = values[np.isfinite(values)]
-            if values.size:
-                by_variable.setdefault(variable, Accumulator()).add(values)
+            by_variable.setdefault(variable, Accumulator()).add(
+                group['VALUE'].to_numpy(dtype=float))
             for itemid, sub in group.groupby('ITEMID'):
-                v = sub['VALUE'].to_numpy(dtype=float, na_value=np.nan)
-                v = v[np.isfinite(v)]
-                if v.size:
-                    by_itemid.setdefault(
-                        (variable, itemid),
-                        Accumulator(ITEMID_RESERVOIR, ITEMID_EXTREMES)).add(v)
+                by_itemid.setdefault(
+                    (variable, itemid),
+                    Accumulator(ITEMID_RESERVOIR, ITEMID_EXTREMES)).add(
+                        sub['VALUE'].to_numpy(dtype=float))
         if index % 500 == 0:
             print(f'  {index:,} subjects, {len(by_variable)} variables', flush=True)
 
     if failures:
         print(f'  {failures:,} subjects could not be read and were skipped')
+    non_numeric = sorted(seen - set(by_variable))
+    if non_numeric:
+        print(f'  {len(non_numeric)} variables carried no numeric values and are not '
+              f'reported: {", ".join(non_numeric)}')
     return by_variable, by_itemid
 
 
