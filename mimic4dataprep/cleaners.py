@@ -1,9 +1,10 @@
+import os
 import pandas as pd
 import numpy as np
 import warnings
 
 from datacleaner.datacleaner import DataCleaner
-from typing import Union
+from typing import Optional, Union
 from numpy.typing import ArrayLike
 
 
@@ -179,7 +180,70 @@ def convert_f_to_c(x: pd.Series) -> pd.Series:
     return convert_units(x, from_unit='F', to_unit='C')
 
 
-def clean_events(events: pd.DataFrame, var_map: pd.DataFrame) -> pd.DataFrame:
+def read_variable_ranges(file_path: str) -> pd.DataFrame:
+    """
+    Read a CSV of per-variable outlier cuts produced by tools/calibrate_outlier_filter.py.
+
+    The cuts are expressed in the scale the model standardizes with, so a value beyond them
+    is one whose standardized magnitude would dominate a loss computed over the feature. At
+    minimum the CSV must contain the following columns:
+
+    - VARIABLE: The variable name, matching the VARIABLE column of the item ID map.
+    - LOW: Values below this are removed.
+    - HIGH: Values above this are removed.
+
+    Args:
+
+        file_path (str): Path to the CSV file containing the cuts.
+
+    Returns:
+
+        DataFrame: A DataFrame indexed by VARIABLE with LOW and HIGH columns.
+    """
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    ranges = pd.read_csv(file_path, index_col='VARIABLE')
+    missing = {'LOW', 'HIGH'} - set(ranges.columns)
+    if missing:
+        raise ValueError(
+            f"{file_path} is missing required column(s): {', '.join(sorted(missing))}. "
+            f"Generate it with tools/calibrate_outlier_filter.py --emit_ranges."
+        )
+    return ranges.loc[:, ['LOW', 'HIGH']]
+
+
+def remove_extreme_values(events: pd.DataFrame, ranges: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drop observations lying outside the per-variable cuts.
+
+    Applied after the unit conversions, so that a value is compared against cuts measured in
+    the unit it now carries. Variables absent from `ranges` are left untouched.
+
+    Args:
+
+        events (pd.DataFrame): Cleaned events with VARIABLE and VALUE columns.
+        ranges (pd.DataFrame): Cuts indexed by VARIABLE, with LOW and HIGH columns.
+
+    Returns:
+
+        DataFrame: `events` without the rows whose VALUE falls outside its variable's cuts.
+    """
+
+    if events.shape[0] == 0 or ranges is None or ranges.shape[0] == 0:
+        return events
+
+    bounds = events['VARIABLE'].map(ranges['LOW']), events['VARIABLE'].map(ranges['HIGH'])
+    value = pd.to_numeric(events['VALUE'], errors='coerce')
+    # A variable with no cuts, or a value that is not numeric, leaves the row in place: the
+    # comparison is only allowed to remove rows it can actually judge.
+    outside = ((value < bounds[0]) | (value > bounds[1])).fillna(False)
+    return events.loc[~outside]
+
+
+def clean_events(events: pd.DataFrame, var_map: pd.DataFrame,
+                 ranges: Optional[pd.DataFrame] = None) -> pd.DataFrame:
 
     sel_cols = ['VARIABLE', 'PARAM_TYPE', 'ITEMID', 'UNITNAME']
     grouped_vars = var_map.reset_index().loc[:, sel_cols].groupby(['VARIABLE', 'PARAM_TYPE'])
@@ -286,5 +350,9 @@ def clean_events(events: pd.DataFrame, var_map: pd.DataFrame) -> pd.DataFrame:
 
     # Apply the cleaning pipelines
     cleaned_events = dc(events, value_column='VALUE', variable_column='ITEMID')
+
+    # Last, so that values are compared against the cuts in their converted units.
+    if ranges is not None:
+        cleaned_events = remove_extreme_values(cleaned_events, ranges)
 
     return cleaned_events

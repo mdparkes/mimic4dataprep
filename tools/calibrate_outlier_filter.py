@@ -369,6 +369,36 @@ def report_tail_gap(by_variable, args):
           f'wants looking at before the rule is adopted.')
 
 
+RANGE_COLUMNS = ('VARIABLE', 'MEDIAN', 'SCALE', 'LOW', 'HIGH', 'U')
+
+
+def emit_ranges(by_variable, args, path):
+    """Write the standardized-magnitude cuts for cleaners.py to apply.
+
+    Extraction runs one subject at a time and so has no view of a variable's distribution.
+    The cuts are therefore measured once, here, over a sample of subjects, and written out
+    for the per-subject pass to read. Percentiles and a median are stable at this sample
+    size and are not disturbed by the values being removed, so the file does not need
+    regenerating as the data changes.
+    """
+    lines = [','.join(RANGE_COLUMNS)]
+    written = 0
+    for variable in sorted(by_variable):
+        centre, scale = standardized_scale(by_variable[variable].body_sample())
+        if not np.isfinite(scale):
+            continue
+        low, high = centre - args.u * scale, centre + args.u * scale
+        lines.append(f'{variable},{centre:.10g},{scale:.10g},{low:.10g},{high:.10g},{args.u:g}')
+        written += 1
+    with open(path, 'w') as handle:
+        handle.write('\n'.join(lines) + '\n')
+    print(f'\nwrote {written} variable ranges at --u {args.u:g} to {path}')
+    skipped = sorted(set(by_variable) - {line.split(',')[0] for line in lines[1:]})
+    if skipped:
+        print(f'  {len(skipped)} variable(s) have no usable percentile range and are not '
+              f'filtered: {", ".join(skipped)}')
+
+
 def print_reading_guide(args):
     """What the report measures and how to act on it, ahead of the tables themselves."""
     print(f'{"=" * 100}')
@@ -731,6 +761,9 @@ def main():
     parser.add_argument('--u', type=float, default=20.0,
                         help='Units of (p95 - p5) from the median beyond which the third '
                              'rule cuts.')
+    parser.add_argument('--emit_ranges', type=str, default=None,
+                        help='Write the standardized-magnitude cuts to this CSV, for '
+                             'extract_episodes_from_subjects.py to apply.')
     parser.add_argument('--warn_fraction', type=float, default=0.001,
                         help='Flag a variable whose cut removes more than this share.')
     parser.add_argument('--warn_ratio', type=float, default=1.5,
@@ -754,6 +787,9 @@ def main():
     report_standardized(by_variable, args)
     report_unloggable(by_variable, args)
     report_unit_audit(by_itemid, var_map, args)
+
+    if args.emit_ranges:
+        emit_ranges(by_variable, args, args.emit_ranges)
 
 
 if __name__ == '__main__':

@@ -6,7 +6,7 @@ import logging
 import os
 from tqdm import tqdm
 
-from mimic4dataprep.cleaners import clean_events
+from mimic4dataprep.cleaners import clean_events, read_variable_ranges
 from mimic4dataprep.subject import read_diagnoses, read_events, read_stays
 from mimic4dataprep.subject import add_hours_elapsed_to_events, get_events_for_stay
 from mimic4dataprep.subject import convert_events_to_timeseries, get_last_valid_from_timeseries
@@ -21,6 +21,11 @@ parser.add_argument('--variable_map_file', type=str,
 parser.add_argument('--reference_range_file', type=str,
                     default=os.path.join(os.path.dirname(__file__), '../resources/variable_ranges.csv'),
                     help='CSV containing reference ranges for VARIABLEs.')
+parser.add_argument('--outlier_ranges_file', type=str, default=None,
+                    help='CSV of per-variable outlier cuts from '
+                         'tools/calibrate_outlier_filter.py --emit_ranges. Values outside a '
+                         'variable\'s cuts are dropped after unit conversion. Omit to keep '
+                         'every value.')
 parser.add_argument('--use_full_record_history', action='store_true', \
                     help="If set, episode timeseries will include all events recorded prior to and during the ICU"
                     " stay. If not set, the episode timeseries will only include "
@@ -29,6 +34,12 @@ args, _ = parser.parse_known_args()
 
 var_map = read_itemid_to_variable_map(args.variable_map_file)
 variables = var_map.VARIABLE.unique()
+
+ranges = None
+if args.outlier_ranges_file:
+    ranges = read_variable_ranges(args.outlier_ranges_file)
+    print(f"Applying outlier cuts for {ranges.shape[0]} variables from "
+          f"{args.outlier_ranges_file}")
 
 for subject_dir in tqdm(os.listdir(args.subjects_root_path), desc='Iterating over subjects'):
     subj_path = os.path.join(args.subjects_root_path, subject_dir)
@@ -61,7 +72,7 @@ for subject_dir in tqdm(os.listdir(args.subjects_root_path), desc='Iterating ove
         print(subj_path)
     # Filtering events to only include those that are present in the variable map
     events = map_itemids_to_variables(events, var_map)
-    events = clean_events(events, var_map)
+    events = clean_events(events, var_map, ranges)
     if events.shape[0] == 0:
         print(f"Patient {subject_dir} has no events of the selected type(s). Skipping subject.")
         continue

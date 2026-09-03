@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools.calibrate_outlier_filter import (
     Accumulator, EXTREMES, RESERVOIR, UNDECLARED, declared_unit, numeric_values,
     print_reading_guide, report_unit_audit, robust_log_cut, robust_log_z,
-    standardized_extent, standardized_scale, tail_gap_cut)
+    RANGE_COLUMNS, emit_ranges, standardized_extent, standardized_scale,
+    tail_gap_cut)
 
 
 DEFAULTS = dict(gap=0.5, quantile=0.999, min_fold=3.0)
@@ -429,3 +430,29 @@ def test_negatives_are_charged_to_a_rule_that_works_in_original_units():
     accumulator = loaded(np.concatenate([np.full(900, 37.0), np.full(40, -17.78)]))
     assert accumulator.beyond(30.0, 45.0)[0] == 0                # log rules never saw them
     assert accumulator.beyond(30.0, 45.0, positive_only=False)[0] == 40
+
+
+def emitted(by_variable, tmp_path, u=100.0):
+    import argparse
+    path = str(tmp_path / 'ranges.csv')
+    emit_ranges(by_variable, argparse.Namespace(u=u), path)
+    return pd.read_csv(path)
+
+
+def test_emitted_ranges_carry_the_columns_cleaners_reads(tmp_path):
+    frame = emitted({'AST': loaded(np.arange(1, 1001, dtype=float))}, tmp_path)
+    assert list(frame.columns) == list(RANGE_COLUMNS)
+
+
+def test_an_emitted_cut_is_u_scales_either_side_of_the_median(tmp_path):
+    values = np.arange(1, 1001, dtype=float)
+    frame = emitted({'AST': loaded(values)}, tmp_path, u=100.0)
+    row = frame.iloc[0]
+    assert row['HIGH'] == pytest.approx(row['MEDIAN'] + 100.0 * row['SCALE'])
+    assert row['LOW'] == pytest.approx(row['MEDIAN'] - 100.0 * row['SCALE'])
+
+
+def test_a_variable_with_no_usable_range_is_left_out_rather_than_given_a_bad_cut(tmp_path):
+    frame = emitted({'GCS eye opening': loaded(np.full(500, 4.0)),
+                     'AST': loaded(np.arange(1, 1001, dtype=float))}, tmp_path)
+    assert list(frame['VARIABLE']) == ['AST']
