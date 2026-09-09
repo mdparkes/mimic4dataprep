@@ -99,3 +99,6 @@ datacleaner/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Generated per run by step 3 of the dataprep pipeline
+mimic4dataprep/resources/variable_ranges_generated.csv
