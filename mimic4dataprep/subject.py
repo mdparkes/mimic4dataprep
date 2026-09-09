@@ -47,6 +47,12 @@ def read_events(subject_path, remove_null=True):
     return events
 
 
+# Text features written when an admission ends. A record of one that is charted at or after an
+# ICU stay's INTIME reports on that stay, so `get_events_for_stay` nullifies it rather than
+# offer the stay's own discharge documentation as a feature of it.
+DISCHARGE_TIME_TEXT_FEATURES = ('Discharge Summary', 'Diagnosis Descriptions')
+
+
 def get_events_for_stay(events, intime, outtime, use_full_history=False):
     
     if use_full_history:
@@ -76,13 +82,21 @@ def get_events_for_stay(events, intime, outtime, use_full_history=False):
     if 'ICUSTAY_ID' in events.columns:
         del events['ICUSTAY_ID']
 
-    # Drop ICD diagnoses features that were recorded during the current hospital stay.
-    # The current stay's diagnoses determine phenotype labels and cannot be used as features.
-    # Locate non-null diagnosis description values and nullify them if CHARTTIME > intime
-    if 'Diagnosis Descriptions' in events.columns:
-        sel = events['Diagnosis Descriptions'].notnull() & (events.CHARTTIME > intime)
-        if sel.any():
-            events.loc[sel, 'Diagnosis Descriptions'] = ''
+    # Drop the discharge-time text of the current hospital stay. Each of these features is
+    # written when an admission ends, so a record of one charted at or after this ICU stay's
+    # INTIME describes the stay itself: the diagnoses determine the phenotype labels, and the
+    # summary recounts the outcome. Records charted earlier belong to previous admissions and
+    # are the patient's history, so they are kept.
+    #
+    # The boundary is INTIME itself rather than the instant after it, because
+    # add_hours_elapsed_to_events measures HOURS from INTIME: a record charted exactly at
+    # admission becomes HOURS == 0, which is the first record of the stay and not the last of
+    # the history.
+    for feature in DISCHARGE_TIME_TEXT_FEATURES:
+        if feature in events.columns:
+            sel = events[feature].notnull() & (events.CHARTTIME >= intime)
+            if sel.any():
+                events.loc[sel, feature] = ''
 
     return events
 
